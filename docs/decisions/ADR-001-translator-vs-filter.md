@@ -1,6 +1,6 @@
 # ADR-001: RIME 接入深度——filter 还是 translator
 
-- 状态：Proposed（2026-06-10 源码调研已支持方案 B；待最小 translator 插件编译实测后定案）
+- 状态：Accepted（2026-06-10 带条件定案：插件机制经两轮源码核对零阻塞，编译实测因本机无 C++ 工具链顺延为 M2 第一项任务，若实测翻车回退本决策）
 - 日期：2026-06-10
 - 决策者：用户 + Claude
 
@@ -34,4 +34,5 @@
 - ⚠️ Windows 下运行时外置插件 DLL 未实现（源码明文 TODO）：自研 translator 必须**静态合并构建进 rime.dll**
 - ⚠️ WeaselServer 全局 `g_api_mutex` 串行处理所有应用按键：Brain IPC 必须带 15-20ms 硬超时 + 无 Brain 降级，否则冻结全系统输入
 - ℹ️ 拓扑修正：插件运行在 WeaselServer.exe 常驻进程而非宿主应用内，崩溃不带崩宿主；异步续写预览可在同进程 WeaselUI 层绘制
-- ⏳ 定案前剩余实证：最小 translator 插件的编译、注册与延迟手感实测
+- ✅ 插件机制二次核对（2026-06-10 编译实测准备，experiments/003-translator-poc/）：merged-plugin 目录 GLOB → RIME_EXTRA_MODULES → kDefaultModules → 静态强引用全链路零阻塞，放目录即自动注册，**无需修改 librime 源文件**；官方 release CI 长期以同一机制在 Windows 合并三方插件
+- ⏳ 顺延到 M2 第一项：编译 + 运行实测（本机无 MSVC/CMake 工具链，MochiTranslator 源码与一键脚本已备好，装完工具链约 30-60 分钟出结果）。剩余不确定性（MSVC .CRT$XCU 自注册、15ms 延迟手感）均非架构级

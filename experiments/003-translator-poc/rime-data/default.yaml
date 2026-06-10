@@ -1,0 +1,13 @@
+# Mochi PoC 最小 default.yaml —— 只挂 mochi schema
+config_version: "0.1.mochi-poc"
+
+schema_list:
+  - schema: mochi
+
+switcher:
+  caption: 〔方案選單〕
+  hotkeys:
+    - F4
+
+menu:
+  page_size: 5

@@ -1,0 +1,27 @@
+# Mochi PoC schema —— 关键点：translators 不含 script_translator（明月拼音），
+# 候选 100% 出自 mochi_translator（验证"候选完全接管"，调研报告 2.1 节）。
+schema:
+  schema_id: mochi
+  name: "Mochi PoC"
+  version: "0.1"
+  description: |
+    ADR-001 方案 B 编译实测用最小方案。
+    任意字母输入应返回唯一候选 MOCHI_POC。
+
+engine:
+  processors:
+    - ascii_composer
+    - key_binder
+    - speller
+    - selector
+    - navigator
+    - express_editor
+  segmentors:
+    - ascii_segmentor
+    - abc_segmentor
+    - fallback_segmentor
+  translators:
+    - mochi_translator
+
+speller:
+  alphabet: zyxwvutsrqponmlkjihgfedcba

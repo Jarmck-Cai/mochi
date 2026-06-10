@@ -21,19 +21,20 @@
 
 ## 进行中
 
-- 最小 translator 插件编译实测（experiments/003-translator-poc/，agent 后台进行中）→ 定案 ADR-001
+- translator 编译实测：准备工作全部完成（librime+deps 已克隆、MochiTranslator 源码与 build-all.ps1 一键脚本就绪，见 experiments/003-translator-poc/README.md），**卡在本机无 C++ 工具链**——需安装 VS Build Tools + CMake（见"阻塞"）
 
 ## 下一步（按优先级）
 
-1. **最小 translator 插件编译实测**（注册、每键调用频率、延迟手感）→ 定案 ADR-001。这是 ADR-001 唯一剩余实证环节
+1. **安装 C++ 工具链**（VS Build Tools + CMake，约数 GB）→ 运行 experiments/003-translator-poc/build-all.ps1 完成编译实测（M2 第一项任务）
 2. **M1 门禁补全**：需要用户的**中文**个人语料（微信聊天导出/中文笔记/中文文章，.txt/.md 放 data/personal/）跑个性化中文排序指标
 3. **UIA 补测**（优先级因 ADR-004 下降）：微信输入框 caret rect、QQ/钉钉
 4. 定案 ADR-003（Brain 服务语言）
 
 ## 阻塞 / 待用户决策
 
+- **C++ 工具链安装**（系统级安装，待用户同意）：VS Build Tools 2022（含 MSVC v143 + Windows SDK）+ CMake。winget 一键：`winget install Microsoft.VisualStudio.2022.BuildTools` + `winget install Kitware.CMake`
 - 中文个人语料待用户提供（M1 门禁的前提；英文论文已用于术语词库验证；用户已确认素材可选，不阻塞 M2 开工）
-- ADR-001 待编译实测后最终拍板
+- ADR-001 已带条件定案 Accepted（编译实测顺延 M2 第一项，翻车即回退）
 
 ## 关键约束备忘
 

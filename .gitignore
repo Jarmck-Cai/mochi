@@ -29,6 +29,9 @@ experiments/**/output/
 # UIA probe raw captures — contain real on-screen content (chat messages etc.)
 experiments/002-uia-probe/*-output.txt
 
+# Shallow-cloned third-party source trees (rebuild via experiments/003 README)
+experiments/003-translator-poc/librime/
+
 # Local env & editor
 .env
 .vscode/
