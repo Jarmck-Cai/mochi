@@ -72,10 +72,17 @@ def build_personal_layer(
                 continue
             lm.add_sentence(toks, weight)
             for t in toks:
-                word_counts[t] += weight
-            for m in re.finditer(r"[A-Za-z]{2,20}", clause):
-                surface_counts[(m.group(0).lower(), m.group(0))] += weight
+                if not t.isascii():
+                    word_counts[t] += weight  # English counted in full-text pass
             n_clauses += 1
+        # English terms are harvested from the FULL document text, not only
+        # from Chinese clauses: an English-only corpus (e.g. the user's papers)
+        # still yields a personal English lexicon + casing habits, which is
+        # exactly the document-import cold-start path for mixed CN/EN typing.
+        for m in re.finditer(r"[A-Za-z]{2,20}", text):
+            low = m.group(0).lower()
+            word_counts[low] += weight
+            surface_counts[(low, m.group(0))] += weight
     lm.finalize()
 
     # Preferred written form of each English term (e.g. resnet -> ResNet):

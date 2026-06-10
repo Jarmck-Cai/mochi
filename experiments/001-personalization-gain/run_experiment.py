@@ -125,6 +125,27 @@ def run(args: argparse.Namespace) -> None:
         f"lexicon={len(layer.lexicon)}, zh-oov-words={len(layer.zh_oov_words)}, "
         f"terms={len(layer.terms)}; personal LM {layer.lm.stats()}"
     )
+    if layer.n_train_clauses == 0:
+        log(
+            "WARNING: no Chinese clauses in the train docs (English-only corpus?). "
+            "Personal LM is EMPTY; only the English term lexicon / casing habits "
+            "are active. The M1 gate metric needs Chinese personal text."
+        )
+    if layer.terms:
+        top = sorted(
+            ((layer.lexicon.get(t, 0.0), t) for t in layer.terms), reverse=True
+        )[:25]
+        log("top personal terms: " + ", ".join(layer.case_map.get(t, t) for _, t in top))
+        results_dir.mkdir(exist_ok=True)
+        (results_dir / "personal_terms.txt").write_text(
+            "\n".join(
+                f"{layer.case_map.get(t, t)}\t{layer.lexicon.get(t, 0.0):.1f}"
+                for _, t in sorted(
+                    ((layer.lexicon.get(t, 0.0), t) for t in layer.terms), reverse=True
+                )
+            ),
+            encoding="utf-8",
+        )
     en_personal_matcher = build_english_matcher(
         {w: layer.case_map.get(w, w) for w in layer.lexicon if w.isascii()}
     )
@@ -163,6 +184,12 @@ def run(args: argparse.Namespace) -> None:
         f"personal test set: {len(test_items)} clauses "
         f"({sum(i.is_mixed for i in test_items)} mixed CN/EN)"
     )
+    if not test_items:
+        log(
+            "WARNING: personal test set is EMPTY (no Chinese clauses in test docs). "
+            "Conversion metrics below will be all-zero; the personal-domain "
+            "comparison is NOT meaningful for this run."
+        )
 
     control_items = []
     for sent in control_sents:

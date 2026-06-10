@@ -1,11 +1,11 @@
 # 项目状态
 
 > 每个 session 收工时更新本文件。历史细节见 devlog/。
-> 最后更新：2026-06-10（第二次更新：三路并行调研完成）
+> 最后更新：2026-06-10（第三次更新：真实语料初跑 + ADR-004）
 
 ## 当前阶段
 
-验证阶段：M1 流水线已就绪（待真实语料），ADR-001 接近定案
+验证阶段：M1 部分验证（术语提取/中英混打已证实，门禁指标待中文语料），ADR-001 接近定案
 
 ## 已完成
 
@@ -15,6 +15,9 @@
 - [x] **librime translator 可行性调研**（docs/research/2026-06-10-librime-translator-feasibility.md）：方案 B 成立；Windows 需静态合并进 rime.dll；WeaselServer 全局锁 → Brain IPC 须 15-20ms 硬超时
 - [x] **实验 001 流水线**（experiments/001-personalization-gain/）：端到端跑通，替身语料 +16.7pp 整句命中、+17.6pp 术语命中、通用对照回退 <1pp
 - [x] **UIA 实测**（experiments/002-uia-probe/ + docs/research/2026-06-10-uia-context-readability.md）：微信 4.x 完全可读（对话历史+输入框），最大风险初步解除；caret rect 可行
+- [x] **GitHub**：https://github.com/Jarmck-Cai/mochi （main 分支已推送）
+- [x] **实验 001 真实语料初跑**：用户语料为英文论文（HFO/癫痫领域）→ 流水线增强为全文英文术语提取（文档导入冷启动路径）。提取 854 词个人词库（HFOs/pHFOs/EEG/SOZ，含大小写习惯），混打演示：baseline "监测俄eg信号" → +personal "监测EEG信号" 全部正确。**M1 门禁指标（中文个性化排序）需要中文个人语料，待用户提供**
+- [x] **ADR-004（Proposed）**：上下文获取改三级阶梯（场景信号 / IME 自有提交流 / UIA 读屏降为 M5 按应用 opt-in），语料主来源确立为 IME 第一方输入流
 
 ## 进行中
 
@@ -23,16 +26,14 @@
 ## 下一步（按优先级）
 
 1. **最小 translator 插件编译实测**（注册、每键调用频率、延迟手感）→ 定案 ADR-001。这是 ADR-001 唯一剩余实证环节
-2. **实验 001 真实数据**：用户提供个人语料（.txt/.md 放 experiments/001-personalization-gain/data/personal/）→ 跑 M1 门禁（≥10pp 通过）
-3. **UIA 补测**：微信输入框 caret rect（敲字后）、QQ/钉钉、记事本/VS Code/Word
-4. 定案 ADR-003（Brain 服务语言）
-5. GitHub 仓库：建议名 mochi-ime，等用户提供地址后 push
+2. **M1 门禁补全**：需要用户的**中文**个人语料（微信聊天导出/中文笔记/中文文章，.txt/.md 放 data/personal/）跑个性化中文排序指标
+3. **UIA 补测**（优先级因 ADR-004 下降）：微信输入框 caret rect、QQ/钉钉
+4. 定案 ADR-003（Brain 服务语言）、ADR-004（待用户确认）
 
 ## 阻塞 / 待用户决策
 
-- 真实个人语料待用户提供（M1 门禁的前提）
-- GitHub 仓库地址待用户提供
-- ADR-001 待编译实测后最终拍板
+- 中文个人语料待用户提供（M1 门禁的前提；英文论文已用于术语词库验证）
+- ADR-001 待编译实测后最终拍板；ADR-004 待用户确认
 
 ## 关键约束备忘
 

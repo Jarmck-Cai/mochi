@@ -3,4 +3,6 @@ data/*
 !data/README.md
 .venv/
 __pycache__/
-results/full_run.log
+# results may be regenerated from the real personal corpus -> never commit
+# (stand-in demo numbers are preserved in report-draft.md)
+results/
