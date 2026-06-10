@@ -8,9 +8,19 @@
 //! - server loops on accept; each connected client is served on its own
 //!   thread so a plugin reconnect (or a second client) is never blocked
 
+mod artifacts;
+mod decoder;
+mod engine;
+mod interner;
+mod lattice;
+mod lm;
 mod protocol;
 
+use std::path::PathBuf;
 use std::ptr;
+use std::sync::Arc;
+
+use engine::Engine;
 use windows_sys::Win32::Foundation::{
     CloseHandle, GetLastError, ERROR_BROKEN_PIPE, ERROR_MORE_DATA, ERROR_PIPE_CONNECTED,
     INVALID_HANDLE_VALUE,
@@ -36,8 +46,136 @@ fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
+/// Default artifacts dir: `artifacts/v0` relative to the repo root — try the
+/// cwd first, then walk up from the exe location (target/release/... -> repo).
+fn default_artifacts_dir() -> PathBuf {
+    let rel = PathBuf::from("artifacts").join("v0");
+    if rel.is_dir() {
+        return rel;
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        let mut dir = exe.parent().map(|p| p.to_path_buf());
+        while let Some(d) = dir {
+            let cand = d.join("artifacts").join("v0");
+            if cand.is_dir() {
+                return cand;
+            }
+            dir = d.parent().map(|p| p.to_path_buf());
+        }
+    }
+    rel
+}
+
+struct Cli {
+    artifacts: PathBuf,
+    beam_width: usize,
+    topn: usize,
+    bench: bool,
+    decode: Vec<String>,
+}
+
+fn parse_cli() -> Cli {
+    let mut cli = Cli {
+        artifacts: default_artifacts_dir(),
+        beam_width: 12,
+        topn: 5,
+        bench: false,
+        decode: Vec::new(),
+    };
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        let mut take = |what: &str| {
+            args.next()
+                .unwrap_or_else(|| panic!("{} requires a value", what))
+        };
+        match arg.as_str() {
+            "--artifacts" => cli.artifacts = PathBuf::from(take("--artifacts")),
+            "--beam" => cli.beam_width = take("--beam").parse().expect("--beam: number"),
+            "--topn" => cli.topn = take("--topn").parse().expect("--topn: number"),
+            "--bench" => cli.bench = true,
+            "--decode" => {
+                cli.decode.extend(args.by_ref());
+                break;
+            }
+            other => {
+                eprintln!(
+                    "usage: mochi-brain [--artifacts <dir>] [--beam N] [--topn N] \
+                     [--bench | --decode <keys>...]\nunknown argument: {}",
+                    other
+                );
+                std::process::exit(2);
+            }
+        }
+    }
+    cli
+}
+
+/// `--bench`: per-keystream-length decode latency (median/max over the full
+/// query path = lattice + beam search + candidate materialization).
+fn run_bench(engine: &Engine) {
+    // realistic all-pinyin stream, truncated per length (29 keys)
+    const BASE: &str = "woyaoceshizhongwenshurufangfa";
+    const ITERS: usize = 200;
+    println!("len\tkeys\tmedian_us\tmax_us\ttop1");
+    for len in 1..=20usize {
+        let keys = &BASE[..len];
+        // warmup
+        for _ in 0..5 {
+            std::hint::black_box(engine.query(keys));
+        }
+        let mut samples = Vec::with_capacity(ITERS);
+        let mut top1 = String::new();
+        for _ in 0..ITERS {
+            let t0 = std::time::Instant::now();
+            let cands = std::hint::black_box(engine.query(keys));
+            samples.push(t0.elapsed().as_micros() as u64);
+            if top1.is_empty() {
+                if let Some(c) = cands.first() {
+                    top1 = c.text.clone();
+                }
+            }
+        }
+        samples.sort_unstable();
+        let median = samples[samples.len() / 2];
+        let max = *samples.last().unwrap();
+        println!("{}\t{}\t{}\t{}\t{}", len, keys, median, max, top1);
+    }
+}
+
 fn main() {
-    eprintln!("[brain] mochi-brain v0 listening on {}", PIPE_NAME);
+    let cli = parse_cli();
+    let engine = match Engine::load(&cli.artifacts, cli.beam_width, cli.topn) {
+        Ok(e) => Arc::new(e),
+        Err(e) => {
+            eprintln!("[brain] failed to load artifacts: {}", e);
+            std::process::exit(1);
+        }
+    };
+    if cli.bench {
+        run_bench(&engine);
+        return;
+    }
+    if !cli.decode.is_empty() {
+        // one-shot decode for parity checks / debugging: keys<TAB>text<TAB>score
+        for keys in &cli.decode {
+            let t0 = std::time::Instant::now();
+            let cands = engine.query(keys);
+            let us = t0.elapsed().as_micros();
+            for (i, c) in cands.iter().enumerate() {
+                println!(
+                    "{}\t#{}\t{}\t{}\t{:.4}\t{}us",
+                    keys,
+                    i + 1,
+                    c.text,
+                    c.preedit,
+                    c.quality,
+                    us
+                );
+            }
+        }
+        return;
+    }
+    eprintln!("[brain] mochi-brain listening on {}", PIPE_NAME);
     let name = wide(PIPE_NAME);
     let mut client_seq: u64 = 0;
     loop {
@@ -73,13 +211,14 @@ fn main() {
         let id = client_seq;
         eprintln!("[brain] client #{} connected", id);
         let handle = PipeHandle(pipe as isize);
+        let engine = Arc::clone(&engine);
         std::thread::spawn(move || {
-            serve_client(handle, id);
+            serve_client(handle, id, &engine);
         });
     }
 }
 
-fn serve_client(handle: PipeHandle, id: u64) {
+fn serve_client(handle: PipeHandle, id: u64, engine: &Engine) {
     let pipe = handle.0 as *mut core::ffi::c_void;
     let mut buf = vec![0u8; MAX_MESSAGE];
     loop {
@@ -107,7 +246,7 @@ fn serve_client(handle: PipeHandle, id: u64) {
         if read == 0 {
             break; // client closed its end
         }
-        let response = protocol::handle_message(&buf[..read as usize]);
+        let response = protocol::handle_message(engine, &buf[..read as usize]);
         let mut written: u32 = 0;
         let ok = unsafe {
             WriteFile(

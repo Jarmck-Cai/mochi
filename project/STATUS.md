@@ -28,13 +28,15 @@
 - [x] **M2-1 E2E 链路 ✅（2026-06-10）**：src/brain（Rust，9 单测过）+ src/ime-plugin（C++，成为插件唯一源）。实测：echo 候选经管道上屏、稳态 e2e 中位 0.26-1.2ms（预算余量 >5 倍）、brain 死 23µs 检出不卡键、重启自愈。主会话复测修复 GetTickCount64 量化 bug（伪超时，换 QPC）。报告：docs/research/2026-06-10-m2-e2e-ipc.md（含 5 个遗留问题，管道抢注防护最重要）
 - [x] **lm-artifacts-v0 导出 ✅**：dict 65,121 / ngram 128 万 / english 1 万，21.6s 可重建（experiments/001 export_artifacts.py）
 
+- [x] **M2-2 解码移植 ✅（2026-06-10）**：Rust brain 真实拼音解码上线——`nihao`→你好、`zheshiyigetest`→这是一个test（混打直接工作）。解码中位 ≤200µs/最大 847µs（5ms 预算的 4%）；artifacts 加载 ~600ms/96MB；与 Python 参考 top-1 一致 10/10；26 单测过。又修一个真 bug：WaitForSingleObject 超时被时钟节拍量化提前返回（3030 键压测 133 次误判→0），QPC 重等待兜底。报告：docs/research/2026-06-10-m2-decoder-port.md。**已知锚点：`suijitidu`→"随即梯度"（通用 LM 错），M2-3 个人层接入后应变"随机梯度"**
+
 ## 进行中
 
-- **M2-2 词图+解码移植**（agent 进行中）：实验 001 Python 算法 → Rust brain，加载 artifacts/v0，替换 echo 为真实候选
+（无）
 
 ## 下一步（按优先级）
 
-1. M2-2 词图+解码移植（进行中）
+1. **M2-3 个人记忆库**：PersonalLayer trait 已留好——场景分桶 + 时间衰减计数（rusqlite+内存）+ commit 即时学习闭环（插件侧 commit 通知也要补，见 e2e 报告遗留 3）+ 文档导入冷启动。验收锚点：纠正"随即梯度"一次后 `suijitidu` 出"随机梯度"
 3. M2-3 个人记忆库（场景分桶 + 时间衰减 + commit 即时学习）
 4. M2-4 部署进 Weasel 真实打字，对比微软拼音（M2 验收）
 5. UIA 补测（M5 前完成即可）

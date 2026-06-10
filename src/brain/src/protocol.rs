@@ -1,12 +1,16 @@
 //! ipc-v0 message types and dispatch (docs/specs/ipc-v0.md).
 //!
-//! v0 behavior:
-//! - `query`  -> one echo candidate `MOCHI_BRAIN:<input>` with real elapsed_us
-//! - `commit` -> log and reply `{"v":1,"ok":true}`
+//! Behavior:
+//! - `query`  -> top-N candidates from the lattice decoder (engine.rs);
+//!   elapsed_us covers lattice build + beam search + serialization prep
+//! - `commit` -> log and reply `{"v":1,"ok":true}` (immediate learning lands
+//!   here in M2-3 via the PersonalLayer)
 //! - unknown `v` / `method` / malformed JSON -> `{"v":1,"error":"unsupported"}`
 
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
+
+use crate::engine::Engine;
 
 pub const PROTOCOL_VERSION: u32 = 1;
 
@@ -79,7 +83,7 @@ fn unsupported() -> Vec<u8> {
 
 /// Handle one raw message, return the raw response. Never panics on bad
 /// input; anything unrecognized gets the `unsupported` error per spec.
-pub fn handle_message(raw: &[u8]) -> Vec<u8> {
+pub fn handle_message(engine: &Engine, raw: &[u8]) -> Vec<u8> {
     let started = Instant::now();
     let request: Request = match serde_json::from_slice(raw) {
         Ok(r) => r,
@@ -94,21 +98,20 @@ pub fn handle_message(raw: &[u8]) -> Vec<u8> {
                 eprintln!("[brain] query with unsupported v={}", v);
                 return unsupported();
             }
-            // v0: echo candidate proves the end-to-end link. preedit is
-            // round-tripped too so the full candidate field set is exercised.
-            let candidates = vec![Candidate {
-                text: format!("MOCHI_BRAIN:{}", input),
-                comment: "echo".to_string(),
-                preedit: format!("\u{00ab}{}\u{00bb}", input), // «input»
-                quality: 1.0,
-            }];
+            let candidates = engine.query(&input);
             let elapsed_us = started.elapsed().as_micros() as u64;
             let response = QueryResponse {
                 v: PROTOCOL_VERSION,
                 candidates,
                 elapsed_us,
             };
-            eprintln!("[brain] query input='{}' elapsed={}us", input, elapsed_us);
+            eprintln!(
+                "[brain] query input='{}' cands={} top='{}' elapsed={}us",
+                input,
+                response.candidates.len(),
+                response.candidates.first().map_or("", |c| c.text.as_str()),
+                elapsed_us
+            );
             serde_json::to_vec(&response).expect("query response serializes")
         }
         Request::Commit { v, text, input, .. } => {
@@ -218,40 +221,46 @@ mod tests {
     }
 
     #[test]
-    fn handles_query_with_echo_candidate() {
+    fn handles_query_with_decoded_candidates() {
+        let engine = Engine::mini();
         let raw = br#"{"v":1,"method":"query","input":"nihao","seg":[0,5]}"#;
-        let resp: QueryResponse = serde_json::from_slice(&handle_message(raw)).unwrap();
+        let resp: QueryResponse = serde_json::from_slice(&handle_message(&engine, raw)).unwrap();
         assert_eq!(resp.v, 1);
-        assert_eq!(resp.candidates.len(), 1);
-        assert_eq!(resp.candidates[0].text, "MOCHI_BRAIN:nihao");
-        assert_eq!(resp.candidates[0].quality, 1.0);
+        assert!(!resp.candidates.is_empty());
+        assert_eq!(resp.candidates[0].text, "你好");
+        assert_eq!(resp.candidates[0].preedit, "ni hao");
     }
 
     #[test]
     fn handles_commit_with_ok() {
+        let engine = Engine::mini();
         let raw = r#"{"v":1,"method":"commit","text":"你好","input":"nihao"}"#;
-        let resp: OkResponse = serde_json::from_slice(&handle_message(raw.as_bytes())).unwrap();
+        let resp: OkResponse =
+            serde_json::from_slice(&handle_message(&engine, raw.as_bytes())).unwrap();
         assert_eq!(resp, OkResponse { v: 1, ok: true });
     }
 
     #[test]
     fn rejects_unknown_method() {
+        let engine = Engine::mini();
         let raw = br#"{"v":1,"method":"teleport","input":"x"}"#;
-        let resp: ErrorResponse = serde_json::from_slice(&handle_message(raw)).unwrap();
+        let resp: ErrorResponse = serde_json::from_slice(&handle_message(&engine, raw)).unwrap();
         assert_eq!(resp.error, "unsupported");
     }
 
     #[test]
     fn rejects_unknown_version() {
+        let engine = Engine::mini();
         let raw = br#"{"v":99,"method":"query","input":"x"}"#;
-        let resp: ErrorResponse = serde_json::from_slice(&handle_message(raw)).unwrap();
+        let resp: ErrorResponse = serde_json::from_slice(&handle_message(&engine, raw)).unwrap();
         assert_eq!(resp.error, "unsupported");
     }
 
     #[test]
     fn rejects_malformed_json() {
+        let engine = Engine::mini();
         let resp: ErrorResponse =
-            serde_json::from_slice(&handle_message(b"not json at all")).unwrap();
+            serde_json::from_slice(&handle_message(&engine, b"not json at all")).unwrap();
         assert_eq!(resp.error, "unsupported");
     }
 }

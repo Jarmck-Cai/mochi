@@ -78,13 +78,21 @@ void BrainClient::ArmBackoff() {
 bool BrainClient::WaitOp(OVERLAPPED* ov,
                          ULONGLONG deadline_us,
                          DWORD* transferred) {
-  ULONGLONG now = NowUs();
-  // Ceil to whole ms so a sub-ms remainder never truncates to a 0ms wait.
-  DWORD wait_ms = (now < deadline_us)
-                      ? static_cast<DWORD>((deadline_us - now + 999) / 1000)
-                      : 0;
-  if (WaitForSingleObject(event_, wait_ms) == WAIT_OBJECT_0) {
-    return GetOverlappedResult(pipe_, ov, transferred, FALSE) != 0;
+  // WaitForSingleObject timeouts are quantized to the system timer tick
+  // (10-16ms): a 15ms wait that starts just before a tick boundary can
+  // return WAIT_TIMEOUT after well under 1ms (observed ~0.5ms on ~4% of
+  // keystrokes, each costing a spurious 2s degradation). The deadline is
+  // therefore enforced with QPC only; an early WAIT_TIMEOUT re-waits for
+  // the remainder instead of being trusted.
+  for (;;) {
+    ULONGLONG now = NowUs();
+    if (now >= deadline_us)
+      break;
+    // Ceil to whole ms so a sub-ms remainder never truncates to a 0ms wait.
+    DWORD wait_ms = static_cast<DWORD>((deadline_us - now + 999) / 1000);
+    if (WaitForSingleObject(event_, wait_ms) == WAIT_OBJECT_0) {
+      return GetOverlappedResult(pipe_, ov, transferred, FALSE) != 0;
+    }
   }
   // Deadline blown: cancel, then *reap* the op so the kernel is done with
   // our buffers before the caller's stack/members are reused.

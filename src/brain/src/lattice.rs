@@ -1,0 +1,276 @@
+//! Lattice construction over the key stream (port of pipeline/lattice.py).
+//!
+//! For the current keys we lay three kinds of arcs and let one scoring
+//! function arbitrate in the decoder (DESIGN.md §3, the mixed-input core):
+//!   - pinyin arcs: dictionary words whose concatenated toneless pinyin
+//!     matches a substring (char arcs guarantee any pinyin stream decodes);
+//!   - English word arcs (general vocabulary; the personal lexicon joins
+//!     in M2-3 via the same matcher type);
+//!   - fallback arcs: single raw letters with a large penalty, keeping the
+//!     lattice connected for arbitrary letter sequences.
+
+use rustc_hash::{FxHashMap, FxHashSet};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArcKind {
+    PyWord,   // multi-char dictionary word via pinyin
+    PyChar,   // single hanzi via pinyin
+    EnWord,   // general-vocabulary English word
+    Fallback, // single raw letter, last resort
+}
+
+/// One word stored under a matcher key.
+pub struct Entry {
+    /// Surface form emitted when the arc is taken.
+    pub text: Box<str>,
+    /// Space-separated pinyin syllables (for preedit); for English entries
+    /// this is just the word itself.
+    pub pinyin: Box<str>,
+    /// Interned LM token (lowercase for English, surface for hanzi).
+    pub lm_token: u32,
+}
+
+/// Exact-match dictionary with prefix-based early stopping
+/// (lattice.py `StringMatcher`).
+#[derive(Default)]
+pub struct Matcher {
+    entries: FxHashMap<Box<str>, Vec<Entry>>,
+    prefixes: FxHashSet<Box<str>>,
+    max_len: usize,
+}
+
+impl Matcher {
+    pub fn add(&mut self, key: &str, entry: Entry) {
+        if key.is_empty() {
+            return;
+        }
+        self.entries.entry(key.into()).or_default().push(entry);
+        for i in 1..=key.len() {
+            if !self.prefixes.contains(&key[..i]) {
+                self.prefixes.insert(key[..i].into());
+            }
+        }
+        self.max_len = self.max_len.max(key.len());
+    }
+
+    /// Call `f(end, entries)` for every key matching `keys[start..end]`.
+    /// Entries borrow `&'a self` so arcs can reference them directly.
+    #[inline]
+    pub fn for_matches<'a>(
+        &'a self,
+        keys: &str,
+        start: usize,
+        mut f: impl FnMut(usize, &'a [Entry]),
+    ) {
+        let limit = keys.len().min(start + self.max_len);
+        for end in (start + 1)..=limit {
+            let sub = &keys[start..end];
+            if !self.prefixes.contains(sub) {
+                break;
+            }
+            if let Some(entries) = self.entries.get(sub) {
+                f(end, entries);
+            }
+        }
+    }
+
+    pub fn est_bytes(&self) -> usize {
+        let mut bytes = 0;
+        for (k, v) in &self.entries {
+            bytes += k.len() + 48; // key + map entry overhead
+            for e in v {
+                bytes += e.text.len() + e.pinyin.len() + 40;
+            }
+        }
+        for p in &self.prefixes {
+            bytes += p.len() + 40;
+        }
+        bytes
+    }
+}
+
+/// One lattice arc; borrows surfaces from the engine ('a) so building a
+/// lattice allocates only the per-position Vecs.
+pub struct Arc<'a> {
+    pub end: usize,
+    pub text: &'a str,
+    /// Space-separated syllables (pinyin arcs) or raw letters (en/fallback).
+    pub pinyin: &'a str,
+    pub lm_token: u32,
+    pub kind: ArcKind,
+}
+
+pub struct LatticeBuilder {
+    pub char_matcher: Matcher,
+    pub word_matcher: Matcher,
+    pub en_matcher: Matcher,
+    /// Interned ids for single letters a-z (fallback arcs), index = letter - b'a'.
+    pub letter_tokens: [u32; 26],
+}
+
+impl LatticeBuilder {
+    /// Arcs grouped by start byte position; every position is covered.
+    /// `keys` must be ASCII (the IME segment is always a-z in practice).
+    pub fn build<'a>(&'a self, keys: &'a str) -> Vec<Vec<Arc<'a>>> {
+        let n = keys.len();
+        let mut arcs: Vec<Vec<Arc<'a>>> = (0..n).map(|_| Vec::new()).collect();
+        for i in 0..n {
+            let out = &mut arcs[i];
+            self.char_matcher.for_matches(keys, i, |end, entries| {
+                for e in entries {
+                    out.push(Arc {
+                        end,
+                        text: &e.text,
+                        pinyin: &e.pinyin,
+                        lm_token: e.lm_token,
+                        kind: ArcKind::PyChar,
+                    });
+                }
+            });
+            self.word_matcher.for_matches(keys, i, |end, entries| {
+                for e in entries {
+                    out.push(Arc {
+                        end,
+                        text: &e.text,
+                        pinyin: &e.pinyin,
+                        lm_token: e.lm_token,
+                        kind: ArcKind::PyWord,
+                    });
+                }
+            });
+            self.en_matcher.for_matches(keys, i, |end, entries| {
+                for e in entries {
+                    out.push(Arc {
+                        end,
+                        text: &e.text,
+                        pinyin: &keys[i..end],
+                        lm_token: e.lm_token,
+                        kind: ArcKind::EnWord,
+                    });
+                }
+            });
+            if out.is_empty() {
+                let b = keys.as_bytes()[i];
+                let lm_token = if b.is_ascii_lowercase() {
+                    self.letter_tokens[(b - b'a') as usize]
+                } else {
+                    crate::interner::UNK
+                };
+                out.push(Arc {
+                    end: i + 1,
+                    text: &keys[i..i + 1],
+                    pinyin: &keys[i..i + 1],
+                    lm_token,
+                    kind: ArcKind::Fallback,
+                });
+            }
+        }
+        arcs
+    }
+}
+
+/// Pinyin syllable inventory derived from the dictionary keys; gives the
+/// canonical syllable segmentation used for preedit sanity checks/tests.
+#[derive(Default)]
+pub struct SyllableSet {
+    syllables: FxHashSet<Box<str>>,
+    max_len: usize,
+}
+
+impl SyllableSet {
+    pub fn add(&mut self, syl: &str) {
+        if syl.is_empty() {
+            return;
+        }
+        self.max_len = self.max_len.max(syl.len());
+        if !self.syllables.contains(syl) {
+            self.syllables.insert(syl.into());
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.syllables.len()
+    }
+
+    /// Longest-match-first segmentation with backtracking; None when the
+    /// stream is not a pure pinyin syllable sequence.
+    #[allow(dead_code)] // exercised in tests; production preedit comes from arcs
+    pub fn segment<'a>(&self, keys: &'a str) -> Option<Vec<&'a str>> {
+        fn go<'a>(set: &SyllableSet, keys: &'a str, pos: usize, acc: &mut Vec<&'a str>) -> bool {
+            if pos == keys.len() {
+                return true;
+            }
+            let limit = keys.len().min(pos + set.max_len);
+            for end in ((pos + 1)..=limit).rev() {
+                let sub = &keys[pos..end];
+                if set.syllables.contains(sub) {
+                    acc.push(sub);
+                    if go(set, keys, end, acc) {
+                        return true;
+                    }
+                    acc.pop();
+                }
+            }
+            false
+        }
+        if !keys.is_ascii() {
+            return None;
+        }
+        let mut acc = Vec::new();
+        go(self, keys, 0, &mut acc).then_some(acc)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::artifacts::tests::mini_artifacts;
+
+    #[test]
+    fn syllable_segmentation_longest_match_with_backtracking() {
+        let mut s = SyllableSet::default();
+        for syl in ["ni", "hao", "zhong", "wen", "wo", "yao", "ce", "shi", "xi", "an", "xian"] {
+            s.add(syl);
+        }
+        assert_eq!(s.segment("nihao").unwrap(), vec!["ni", "hao"]);
+        assert_eq!(s.segment("zhongwen").unwrap(), vec!["zhong", "wen"]);
+        // longest-first picks "xian" over "xi an"
+        assert_eq!(s.segment("xian").unwrap(), vec!["xian"]);
+        // backtracking: "xiani" = xi-an-... no; xian+i fails -> xi an i? "i" missing -> None
+        assert!(s.segment("xiani").is_none());
+        assert!(s.segment("nih").is_none());
+        assert!(s.segment("gan").is_none()); // not in this mini inventory
+    }
+
+    #[test]
+    fn lattice_lays_char_word_english_arcs() {
+        let arts = mini_artifacts();
+        let arcs = arts.builder.build("nihao");
+        let at0: Vec<(&str, ArcKind, usize)> =
+            arcs[0].iter().map(|a| (a.text, a.kind, a.end)).collect();
+        // char arc 你 over "ni" and word arc 你好 over "nihao"
+        assert!(at0.contains(&("你", ArcKind::PyChar, 2)));
+        assert!(at0.contains(&("你好", ArcKind::PyWord, 5)));
+        // pinyin field carries the spaced split for preedit
+        let nihao = arcs[0].iter().find(|a| a.text == "你好").unwrap();
+        assert_eq!(nihao.pinyin, "ni hao");
+
+        // English arc: "gan" is both pinyin (敢) and an English word
+        let arcs = arts.builder.build("gan");
+        let kinds: Vec<(&str, ArcKind)> = arcs[0].iter().map(|a| (a.text, a.kind)).collect();
+        assert!(kinds.contains(&("敢", ArcKind::PyChar)));
+        assert!(kinds.contains(&("gan", ArcKind::EnWord)));
+    }
+
+    #[test]
+    fn lattice_fallback_covers_unmatched_positions() {
+        let arts = mini_artifacts();
+        let arcs = arts.builder.build("nivx"); // v/x start no entry in mini dict
+        assert_eq!(arcs[2].len(), 1);
+        assert_eq!(arcs[2][0].kind, ArcKind::Fallback);
+        assert_eq!(arcs[2][0].text, "v");
+        assert_eq!(arcs[2][0].end, 3);
+        // every position has at least one arc (lattice always connected)
+        assert!(arcs.iter().all(|a| !a.is_empty()));
+    }
+}
