@@ -1,13 +1,19 @@
 # src
 
-产品代码目录，M2 启动后按 docs/DESIGN.md 的进程拓扑划分：
+产品代码目录（M2 起），按 docs/DESIGN.md 进程拓扑划分：
 
 ```
 src/
-  ime-plugin/   librime 自定义 translator 插件（C++，极轻，绝不崩溃）
-  brain/        Brain 常驻服务（语言见 ADR-003，未定）
-  llm-host/     LLM 进程封装与调度
-  shared/       IPC 协议定义
+  ime-plugin/   librime merged-plugin（C++，极薄）：MochiTranslator + IPC 客户端
+                + 15ms 硬超时 + 降级。从 experiments/003-translator-poc/mochi 演进而来
+  brain/        Brain 常驻服务（Rust，ADR-003）：IPC 服务端、词图解码、个人记忆库、
+                策略层；后续接 ONNX(ort)、UIA、学习循环
+  shared/       无共享代码（ADR-003 三语分工）；接口契约见 docs/specs/ipc-v0.md
 ```
 
-当前为空——M1（实验 001）通过前不写产品代码。实验原型代码放 experiments/。
+## M2 实施顺序
+
+1. **E2E 链路**（当前）：brain echo 候选经命名管道进 rime_console 显示，双侧延迟日志，超时降级实测
+2. 词图 + 解码移植：experiments/001 的 Python 解码器 → brain（Rust），词典/通用 LM 离线构建（Python）
+3. 个人记忆库：场景分桶 + 时间衰减计数 + commit 即时更新（rusqlite + 内存缓存）
+4. 部署进 Weasel 真实打字，对比微软拼音（M2 验收标准见 project/ROADMAP.md）

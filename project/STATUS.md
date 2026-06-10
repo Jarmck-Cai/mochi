@@ -22,20 +22,23 @@
 - [x] **M1 门禁通过（2026-06-10）**：用户中文语料（微信沟通+电话纪要）实测，整句首选命中率 41.6%→55.1%（**+13.5pp ≥ 10pp**），字级 +4.9pp，41 赢/4 输，通用对照无回退。仅 285 条训练子句即达标——记忆假设强验证。正式报告：experiments/001-personalization-gain/report.md
 - [x] **ADR-001 实测定案（条件解除）**：librime+MochiTranslator 编译成功（VS Build Tools 2022），候选接管 ✓、每键恰 1 次 Query ✓、插件开销 <1μs ✓、15ms 模拟延迟下每键 15.5-16.5ms 无阻塞 ✓。实测数据见 ADR-001 与 experiments/003-translator-poc/README.md
 
+- [x] **ADR-003 定案（Accepted）**：Brain 用 **Rust**（内存安全 + cargo + 编译器为 AI 代码兜底；KenLM 缺口经分析为伪需求）。三语分工：C++ 薄插件 / Rust brain / Python 实验工具
+- [x] **IPC 协议 v0**（docs/specs/ipc-v0.md）：命名管道消息模式 + JSON，query/commit 两个方法，插件侧 15ms 硬超时 + 2s 退避降级
+
 ## 进行中
 
-（无）
+- **M2 第一步：E2E 链路**——brain（Rust）echo 候选经命名管道进 rime_console，双侧延迟日志 + 超时降级实测。Rust 工具链安装中
 
 ## 下一步（按优先级）
 
-1. **M2 开工**：src/ 起项目骨架——ime-plugin（基于 003 的 MochiTranslator 扩展真实词图解码）+ brain 服务 + IPC（15-20ms 硬超时 + 降级）。实验 001 的 Python 解码器是算法参考实现
-2. 定案 ADR-003（Brain 服务语言：C++ vs Rust）——M2 开工前必须定
-3. M2 内迁移：把实验 001 的词图/打分算法移植到 brain 服务（含场景分桶，ADR-004）
-4. UIA 补测（低优先级，M5 前完成即可）：微信输入框 caret rect、QQ/钉钉
+1. M2-1 E2E 链路（进行中）
+2. M2-2 词图+解码移植（实验 001 Python → Rust brain；词典/通用 LM 由 Python 离线构建）
+3. M2-3 个人记忆库（场景分桶 + 时间衰减 + commit 即时学习）
+4. M2-4 部署进 Weasel 真实打字，对比微软拼音（M2 验收）
+5. UIA 补测（M5 前完成即可）
 
 ## 阻塞 / 待用户决策
 
-- ADR-003（Brain 服务语言）建议尽快讨论定案，阻塞 M2 的 brain 服务部分（ime-plugin 部分不阻塞）
 - 仓库中其他工具生成的 AGENTS.md/.codex/.agents 是否保留（不阻塞）
 
 ## 关键约束备忘
