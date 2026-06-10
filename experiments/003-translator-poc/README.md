@@ -1,8 +1,7 @@
 # 实验 003：最小 translator 插件编译实测（ADR-001 方案 B 最后一环）
 
 - 日期：2026-06-10
-- 状态：**源码与构建脚手架就绪；因本机无 C++ 工具链，编译实测未执行**（详见
-  `docs/research/2026-06-10-translator-plugin-compile-test.md`）
+- 状态：**编译实测通过，ADR-001 定案 Accepted**（实测数据见文末与 ADR-001"编译实测结果"节）
 - 目标：把 MochiTranslator（对任意输入返回固定候选 `MOCHI_POC`）静态合并进
   rime.dll，用 rime_api_console 验证候选接管、Query 调用频率、单次耗时、
   以及模拟 15ms 同步延迟下的手感。
@@ -103,3 +102,20 @@ console 起来后（首次会自动部署 schema，留意 stderr 出现
   `librime/plugins/mochi/`。
 - librime 官方模板 `env.bat.template` 默认 `ARCH=Win32`，本实验 `env.bat`
   已改为 `x64`——weasel 生产构建需要 x64 + Win32 双架构，到 M2 再处理。
+
+## 实测结果（2026-06-10）
+
+构建：`cmd /c build-steps.cmd all`（VS Build Tools 2022 + VS 内置 CMake 3.31）。
+环境坑三枚：ps1 要 UTF-8 BOM；vcvars/VsDevCmd 会切工作目录（cd 放其后）；
+开发会话注入 `NoDefaultCurrentDirectoryInExePath=1`（build-steps.cmd 内已清除）。
+
+测试：`rime_console.exe < testinput.txt`（注意 **rime_api_console 的 line_editor
+不兼容重定向 stdin**，会读到乱码键流；管道测试必须用 rime_console）。
+
+| 验证项 | 结果 |
+|---|---|
+| 静态注册（.CRT$XCU） | ✓ `[mochi] module 'mochi' initialized` |
+| 候选接管 + preedit 控制 | ✓ 候选 1 = MOCHI_POC，编码区 «input» |
+| 每键 Query 次数 | ✓ 恰好 1 次（n→ni→nih→niha→nihao 增量） |
+| 单次 Query 插件开销 | ✓ <1μs |
+| 15ms 模拟延迟 | ✓ 每键 15.5-16.5ms，偶发 30ms 尖刺（commit 后首键）；整行连续键流无阻塞无崩溃 |

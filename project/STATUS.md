@@ -1,11 +1,11 @@
 # 项目状态
 
 > 每个 session 收工时更新本文件。历史细节见 devlog/。
-> 最后更新：2026-06-10（第三次更新：真实语料初跑 + ADR-004）
+> 最后更新：2026-06-10（第四次更新：M1 门禁通过 + ADR-001 实测定案）
 
 ## 当前阶段
 
-验证阶段：M1 部分验证（术语提取/中英混打已证实，门禁指标待中文语料），ADR-001 接近定案
+**M1 完成 ✅ → M2 开工就绪**（基本盘：RIME translator + 词图 + 记忆库 + 中英混打）
 
 ## 已完成
 
@@ -19,22 +19,24 @@
 - [x] **实验 001 真实语料初跑**：用户语料为英文论文（HFO/癫痫领域）→ 流水线增强为全文英文术语提取（文档导入冷启动路径）。提取 854 词个人词库（HFOs/pHFOs/EEG/SOZ，含大小写习惯），混打演示：baseline "监测俄eg信号" → +personal "监测EEG信号" 全部正确。**M1 门禁指标（中文个性化排序）需要中文个人语料，待用户提供**
 - [x] **ADR-004（Accepted）**：上下文三级阶梯 + 三点补充——冷启动素材完全可选；场景与语料绑定（个人记忆按场景分桶，层级回退）；Tier 2 读屏为备选/补强，专注 M2-M4。场景分桶已写入 DESIGN 打分公式
 
+- [x] **M1 门禁通过（2026-06-10）**：用户中文语料（微信沟通+电话纪要）实测，整句首选命中率 41.6%→55.1%（**+13.5pp ≥ 10pp**），字级 +4.9pp，41 赢/4 输，通用对照无回退。仅 285 条训练子句即达标——记忆假设强验证。正式报告：experiments/001-personalization-gain/report.md
+- [x] **ADR-001 实测定案（条件解除）**：librime+MochiTranslator 编译成功（VS Build Tools 2022），候选接管 ✓、每键恰 1 次 Query ✓、插件开销 <1μs ✓、15ms 模拟延迟下每键 15.5-16.5ms 无阻塞 ✓。实测数据见 ADR-001 与 experiments/003-translator-poc/README.md
+
 ## 进行中
 
-- **translator 编译实测**：工具链已装好（VS Build Tools 2022 + CMake）。构建脚本三个坑已修复：① ps1 需 UTF-8 BOM；② vcvars/VsDevCmd 会切换工作目录，cd 必须放它之后；③ **本开发会话注入 NoDefaultCurrentDirectoryInExePath=1**，cmd 拒绝裸名调用 build.bat（已在 build-steps.cmd 内清除）。恢复方式：跑 `cmd /c experiments\003-translator-poc\build-steps.cmd all`（约 15-40 分钟），成功后用 rime_api_console 喂 `nihao` 实测（验证方法见 experiments/003-translator-poc/README.md），数据写回 ADR-001
+（无）
 
 ## 下一步（按优先级）
 
-1. **安装 C++ 工具链**（VS Build Tools + CMake，约数 GB）→ 运行 experiments/003-translator-poc/build-all.ps1 完成编译实测（M2 第一项任务）
-2. **M1 门禁补全**：需要用户的**中文**个人语料（微信聊天导出/中文笔记/中文文章，.txt/.md 放 data/personal/）跑个性化中文排序指标
-3. **UIA 补测**（优先级因 ADR-004 下降）：微信输入框 caret rect、QQ/钉钉
-4. 定案 ADR-003（Brain 服务语言）
+1. **M2 开工**：src/ 起项目骨架——ime-plugin（基于 003 的 MochiTranslator 扩展真实词图解码）+ brain 服务 + IPC（15-20ms 硬超时 + 降级）。实验 001 的 Python 解码器是算法参考实现
+2. 定案 ADR-003（Brain 服务语言：C++ vs Rust）——M2 开工前必须定
+3. M2 内迁移：把实验 001 的词图/打分算法移植到 brain 服务（含场景分桶，ADR-004）
+4. UIA 补测（低优先级，M5 前完成即可）：微信输入框 caret rect、QQ/钉钉
 
 ## 阻塞 / 待用户决策
 
-- **C++ 工具链安装**（系统级安装，待用户同意）：VS Build Tools 2022（含 MSVC v143 + Windows SDK）+ CMake。winget 一键：`winget install Microsoft.VisualStudio.2022.BuildTools` + `winget install Kitware.CMake`
-- 中文个人语料待用户提供（M1 门禁的前提；英文论文已用于术语词库验证；用户已确认素材可选，不阻塞 M2 开工）
-- ADR-001 已带条件定案 Accepted（编译实测顺延 M2 第一项，翻车即回退）
+- ADR-003（Brain 服务语言）建议尽快讨论定案，阻塞 M2 的 brain 服务部分（ime-plugin 部分不阻塞）
+- 仓库中其他工具生成的 AGENTS.md/.codex/.agents 是否保留（不阻塞）
 
 ## 关键约束备忘
 

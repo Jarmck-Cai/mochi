@@ -1,6 +1,6 @@
 # ADR-001: RIME 接入深度——filter 还是 translator
 
-- 状态：Accepted（2026-06-10 带条件定案：插件机制经两轮源码核对零阻塞，编译实测因本机无 C++ 工具链顺延为 M2 第一项任务，若实测翻车回退本决策）
+- 状态：Accepted（2026-06-10 定案；当日编译实测通过，条件解除，见"编译实测结果"）
 - 日期：2026-06-10
 - 决策者：用户 + Claude
 
@@ -35,4 +35,9 @@
 - ⚠️ WeaselServer 全局 `g_api_mutex` 串行处理所有应用按键：Brain IPC 必须带 15-20ms 硬超时 + 无 Brain 降级，否则冻结全系统输入
 - ℹ️ 拓扑修正：插件运行在 WeaselServer.exe 常驻进程而非宿主应用内，崩溃不带崩宿主；异步续写预览可在同进程 WeaselUI 层绘制
 - ✅ 插件机制二次核对（2026-06-10 编译实测准备，experiments/003-translator-poc/）：merged-plugin 目录 GLOB → RIME_EXTRA_MODULES → kDefaultModules → 静态强引用全链路零阻塞，放目录即自动注册，**无需修改 librime 源文件**；官方 release CI 长期以同一机制在 Windows 合并三方插件
-- ⏳ 顺延到 M2 第一项：编译 + 运行实测（本机无 MSVC/CMake 工具链，MochiTranslator 源码与一键脚本已备好，装完工具链约 30-60 分钟出结果）。剩余不确定性（MSVC .CRT$XCU 自注册、15ms 延迟手感）均非架构级
+- ✅ **编译实测通过（2026-06-10，experiments/003-translator-poc/）**：
+  - MochiTranslator 静态合并进 rime.dll（2.8MB），`RIME_REGISTER_MODULE` 自注册生效（`[mochi] module 'mochi' initialized`），MSVC .CRT$XCU 疑虑解除
+  - 候选完全接管：schema 只列 mochi_translator，候选 1 = MOCHI_POC，逐候选 preedit 控制生效
+  - **每键恰好 1 次 Query**（增量调用 n→ni→nih→niha→nihao），单次 Query 插件自身开销 <1μs
+  - 15ms 模拟延迟下：每键稳定 15.5-16.5ms（偶发 30ms 尖刺，commit 后首键），整行连续键流无阻塞无崩溃——Brain IPC 15-20ms 硬超时预算成立
+  - 环境坑实录：ps1 需 UTF-8 BOM；VsDevCmd 切换工作目录；开发会话注入 NoDefaultCurrentDirectoryInExePath=1 需局部清除；rime_api_console 的 line_editor 不兼容重定向 stdin（测试用 rime_console.exe）
