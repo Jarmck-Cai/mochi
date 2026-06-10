@@ -1,0 +1,20 @@
+{
+  "v": 0,
+  "built_at": "2026-06-10T22:10:26+00:00",
+  "sources": {
+    "dict": "rime pinyin_simp (data/dict/pinyin_simp.dict.yaml)",
+    "corpus": "SIGHAN bakeoff pku+msr (data/general/, full, no holdout)",
+    "english": "google-10000-english (data/english/google-10000-english.txt)"
+  },
+  "params": {
+    "backoff": "stupid:0.4",
+    "min_trigram": 1.0
+  },
+  "counts": {
+    "dict": 65121,
+    "ngram1": 90476,
+    "ngram2": 955754,
+    "ngram3": 235688,
+    "english": 10000
+  }
+}

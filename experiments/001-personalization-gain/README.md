@@ -24,3 +24,12 @@
 
 - `report.md`：实验报告（结论写回 STATUS.md 和 ROADMAP）
 - 可复用的拼音转换 + 词图解码原型代码（M2 的种子）
+
+## 导出离线产物（lm-artifacts-v0）
+
+复用本实验流水线，把通用层（rime 词典 + 全量 SIGHAN trigram + 英文词表）导出为
+`artifacts/v0/*.tsv + meta.json`（规格见 `docs/specs/lm-artifacts-v0.md`）：
+
+```powershell
+.\.venv\Scripts\python.exe export_artifacts.py   # 输出到 <repo>/artifacts/v0/
+```

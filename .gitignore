@@ -22,6 +22,12 @@ venv/
 experiments/**/data/
 experiments/**/output/
 
+# Offline LM artifacts (rebuild via experiments/001 export_artifacts.py);
+# keep meta.json for provenance
+artifacts/**
+!artifacts/v0/
+!artifacts/v0/meta.json
+
 # Personal typing data — NEVER commit (privacy)
 **/user_data/
 **/*.typing.log

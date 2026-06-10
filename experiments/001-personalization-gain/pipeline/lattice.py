@@ -71,10 +71,14 @@ class StringMatcher:
                 yield end, words
 
 
-def load_rime_dict(path: str | Path, max_word_len: int = 6) -> list[tuple[str, str, int]]:
+def load_rime_dict(
+    path: str | Path, max_word_len: int = 6, join_syllables: bool = True
+) -> list[tuple[str, str, int]]:
     """Parse a rime *.dict.yaml file -> [(word, pinyin_key, weight)].
 
     Lines look like: 词语<TAB>ci yu<TAB>123 ; the YAML header ends with '...'.
+    ``join_syllables=False`` keeps single-space-separated syllables in the key
+    (lm-artifacts-v0 dict.tsv format) instead of concatenating them.
     """
     entries = []
     in_body = False
@@ -97,7 +101,8 @@ def load_rime_dict(path: str | Path, max_word_len: int = 6) -> list[tuple[str, s
                     weight = int(float(parts[2]))
                 except ValueError:
                     weight = 0
-            entries.append((word, pinyin.replace(" ", ""), weight))
+            key = pinyin.replace(" ", "") if join_syllables else " ".join(pinyin.split())
+            entries.append((word, key, weight))
     return entries
 
 
