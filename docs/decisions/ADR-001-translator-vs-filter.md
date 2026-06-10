@@ -1,6 +1,6 @@
 # ADR-001: RIME 接入深度——filter 还是 translator
 
-- 状态：Proposed（建议方案 B，待用户拍板 + librime 插件机制技术验证）
+- 状态：Proposed（2026-06-10 源码调研已支持方案 B；待最小 translator 插件编译实测后定案）
 - 日期：2026-06-10
 - 决策者：用户 + Claude
 
@@ -24,6 +24,14 @@
 
 ## 后果
 
-- 承担整句转换基线质量的全部责任（风险清单第 2 项）
-- 需要先验证：librime 自定义 translator 插件机制是否支持我们需要的全部控制（候选注入、preedit 控制、IPC 出口）
+- 承担整句转换基线质量的全部责任（风险清单第 1 项）
 - 若 librime 插件机制存在硬限制，备选路径是自研 TSF 输入法（工作量大幅上升，需新 ADR）
+
+## 验证补充（2026-06-10 源码调研，详见 docs/research/2026-06-10-librime-translator-feasibility.md）
+
+- ✅ `rime::Translator::Query` + Registry/Module 注册机制支持候选全接管（schema 不配置明月拼音即可绕过）、逐候选 preedit 控制
+- ✅ librime 单线程同步模型，每键约调用 translator 1 次，Query 内同步 IPC 可行
+- ⚠️ Windows 下运行时外置插件 DLL 未实现（源码明文 TODO）：自研 translator 必须**静态合并构建进 rime.dll**
+- ⚠️ WeaselServer 全局 `g_api_mutex` 串行处理所有应用按键：Brain IPC 必须带 15-20ms 硬超时 + 无 Brain 降级，否则冻结全系统输入
+- ℹ️ 拓扑修正：插件运行在 WeaselServer.exe 常驻进程而非宿主应用内，崩溃不带崩宿主；异步续写预览可在同进程 WeaselUI 层绘制
+- ⏳ 定案前剩余实证：最小 translator 插件的编译、注册与延迟手感实测

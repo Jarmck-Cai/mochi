@@ -1,0 +1,6 @@
+# downloaded corpora & user data (rebuild via pipeline/prepare_data.py)
+data/*
+!data/README.md
+.venv/
+__pycache__/
+results/full_run.log

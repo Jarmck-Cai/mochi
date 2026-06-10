@@ -1,4 +1,4 @@
-# P029 — AI 输入法（个人记忆输入法）
+# Mochi（P029）— 懂你的个人记忆输入法
 
 中英混打、懂用户的 Windows 输入法。产品愿景见 [README.md](README.md)，技术方案见 [docs/DESIGN.md](docs/DESIGN.md)。
 

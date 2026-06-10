@@ -26,6 +26,9 @@ experiments/**/output/
 **/user_data/
 **/*.typing.log
 
+# UIA probe raw captures — contain real on-screen content (chat messages etc.)
+experiments/002-uia-probe/*-output.txt
+
 # Local env & editor
 .env
 .vscode/

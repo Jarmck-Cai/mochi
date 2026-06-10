@@ -1,4 +1,4 @@
-# P029 — AI 输入法：懂你的个人记忆输入法
+# Mochi — 懂你的个人记忆输入法
 
 > 项目目录：`~/projects/p029-ai-ime/`
 > 文档目录：`second-brain/Projects/P029_ai-ime/`

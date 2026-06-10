@@ -1,0 +1,117 @@
+{
+  "personal_dir": "E:\\Projects\\P029_ai-ime\\experiments\\001-personalization-gain\\data\\personal_standin",
+  "quick": false,
+  "beam": 12,
+  "configs": {
+    "baseline(generalLM)": {
+      "mu_general": 1.0,
+      "mu_personal": 0.0,
+      "lambda_lexicon": 0.0,
+      "arc_prior": null
+    },
+    "+personalLexicon": {
+      "mu_general": 1.0,
+      "mu_personal": 0.0,
+      "lambda_lexicon": 0.8,
+      "arc_prior": null
+    },
+    "+personalLM": {
+      "mu_general": 0.65,
+      "mu_personal": 0.35,
+      "lambda_lexicon": 0.0,
+      "arc_prior": null
+    },
+    "full(+LM+lexicon)": {
+      "mu_general": 0.65,
+      "mu_personal": 0.35,
+      "lambda_lexicon": 0.8,
+      "arc_prior": null
+    }
+  },
+  "personal_test": {
+    "baseline(generalLM)": {
+      "items": 800,
+      "sentence_top1": 0.4688,
+      "char_acc": 0.8392,
+      "term_hit": 0.8176,
+      "term_occ": 680,
+      "mixed_top1": 0.027,
+      "en_token_recall": 0.5,
+      "mixed_items": 74
+    },
+    "+personalLexicon": {
+      "items": 800,
+      "sentence_top1": 0.4988,
+      "char_acc": 0.8613,
+      "term_hit": 0.8912,
+      "term_occ": 680,
+      "mixed_top1": 0.1081,
+      "en_token_recall": 0.5625,
+      "mixed_items": 74
+    },
+    "+personalLM": {
+      "items": 800,
+      "sentence_top1": 0.6325,
+      "char_acc": 0.9042,
+      "term_hit": 0.9882,
+      "term_occ": 680,
+      "mixed_top1": 0.1892,
+      "en_token_recall": 0.575,
+      "mixed_items": 74
+    },
+    "full(+LM+lexicon)": {
+      "items": 800,
+      "sentence_top1": 0.6362,
+      "char_acc": 0.9072,
+      "term_hit": 0.9941,
+      "term_occ": 680,
+      "mixed_top1": 0.1892,
+      "en_token_recall": 0.575,
+      "mixed_items": 74
+    }
+  },
+  "general_control": {
+    "baseline(generalLM)": {
+      "items": 200,
+      "sentence_top1": 0.32,
+      "char_acc": 0.7682,
+      "term_hit": 1.0,
+      "term_occ": 2,
+      "mixed_top1": 0.0,
+      "en_token_recall": 0.0,
+      "mixed_items": 0
+    },
+    "+personalLexicon": {
+      "items": 200,
+      "sentence_top1": 0.31,
+      "char_acc": 0.7676,
+      "term_hit": 1.0,
+      "term_occ": 2,
+      "mixed_top1": 0.0,
+      "en_token_recall": 0.0,
+      "mixed_items": 0
+    },
+    "+personalLM": {
+      "items": 200,
+      "sentence_top1": 0.315,
+      "char_acc": 0.7653,
+      "term_hit": 1.0,
+      "term_occ": 2,
+      "mixed_top1": 0.0,
+      "en_token_recall": 0.0,
+      "mixed_items": 0
+    },
+    "full(+LM+lexicon)": {
+      "items": 200,
+      "sentence_top1": 0.31,
+      "char_acc": 0.7653,
+      "term_hit": 1.0,
+      "term_occ": 2,
+      "mixed_top1": 0.0,
+      "en_token_recall": 0.0,
+      "mixed_items": 0
+    }
+  },
+  "wins": 143,
+  "losses": 9
+}
