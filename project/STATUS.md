@@ -25,14 +25,16 @@
 - [x] **ADR-003 定案（Accepted）**：Brain 用 **Rust**（内存安全 + cargo + 编译器为 AI 代码兜底；KenLM 缺口经分析为伪需求）。三语分工：C++ 薄插件 / Rust brain / Python 实验工具
 - [x] **IPC 协议 v0**（docs/specs/ipc-v0.md）：命名管道消息模式 + JSON，query/commit 两个方法，插件侧 15ms 硬超时 + 2s 退避降级
 
+- [x] **M2-1 E2E 链路 ✅（2026-06-10）**：src/brain（Rust，9 单测过）+ src/ime-plugin（C++，成为插件唯一源）。实测：echo 候选经管道上屏、稳态 e2e 中位 0.26-1.2ms（预算余量 >5 倍）、brain 死 23µs 检出不卡键、重启自愈。主会话复测修复 GetTickCount64 量化 bug（伪超时，换 QPC）。报告：docs/research/2026-06-10-m2-e2e-ipc.md（含 5 个遗留问题，管道抢注防护最重要）
+- [x] **lm-artifacts-v0 导出 ✅**：dict 65,121 / ngram 128 万 / english 1 万，21.6s 可重建（experiments/001 export_artifacts.py）
+
 ## 进行中
 
-- **M2 第一步：E2E 链路**——brain（Rust）echo 候选经命名管道进 rime_console，双侧延迟日志 + 超时降级实测。Rust 工具链安装中
+- **M2-2 词图+解码移植**（agent 进行中）：实验 001 Python 算法 → Rust brain，加载 artifacts/v0，替换 echo 为真实候选
 
 ## 下一步（按优先级）
 
-1. M2-1 E2E 链路（进行中）
-2. M2-2 词图+解码移植（实验 001 Python → Rust brain；词典/通用 LM 由 Python 离线构建）
+1. M2-2 词图+解码移植（进行中）
 3. M2-3 个人记忆库（场景分桶 + 时间衰减 + commit 即时学习）
 4. M2-4 部署进 Weasel 真实打字，对比微软拼音（M2 验收）
 5. UIA 补测（M5 前完成即可）

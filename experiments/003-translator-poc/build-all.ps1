@@ -26,8 +26,10 @@ if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) {
 }
 cmake --version | Select-Object -First 1
 
-# ---- 1. 同步插件源码（本目录 mochi/ 为 single source of truth）----
-Copy-Item -Recurse -Force (Join-Path $root 'mochi') (Join-Path $librime 'plugins\mochi')
+# ---- 1. 同步插件源码（M2 起 single source of truth 为 src/ime-plugin；本目录 mochi/ 是冻结的历史 PoC）----
+$pluginSrc = Join-Path $root '..\..\src\ime-plugin'
+Remove-Item -Recurse -Force (Join-Path $librime 'plugins\mochi') -ErrorAction SilentlyContinue
+Copy-Item -Recurse -Force $pluginSrc (Join-Path $librime 'plugins\mochi')
 
 # ---- 2. Boost ----
 # librime 的 install-boost.bat 依赖 aria2c + 7z。若没有，这里用 PowerShell 直接下载解压。

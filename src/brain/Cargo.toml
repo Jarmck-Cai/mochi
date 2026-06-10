@@ -1,0 +1,25 @@
+[package]
+name = "mochi-brain"
+version = "0.1.0"
+edition = "2021"
+description = "Mochi brain service v0: named pipe IPC server (docs/specs/ipc-v0.md)"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# windows-sys instead of the full `windows` crate or `interprocess`:
+# - we need exact control over PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE
+#   (message-mode framing is part of the ipc-v0 contract); `interprocess`
+#   abstracts pipes as byte streams by default and hides these flags
+# - windows-sys is the thin declaration-only flavor: no codegen weight,
+#   fastest to compile, smallest dependency surface ("keep it minimal")
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Pipes",
+] }
+
+[profile.release]
+opt-level = 2

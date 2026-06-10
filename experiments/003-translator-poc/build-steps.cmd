@@ -5,6 +5,18 @@ setlocal
 set TARGET=%1
 if "%TARGET%"=="" set TARGET=all
 
+rem Sync plugin source: src\ime-plugin is the single source of truth since
+rem M2 (the old experiments\003 mochi\ dir is a frozen PoC, no longer used).
+set PLUGIN_SRC=%~dp0..\..\src\ime-plugin
+if not exist "%PLUGIN_SRC%\CMakeLists.txt" (
+  echo ERROR: plugin source not found at %PLUGIN_SRC%
+  exit /b 5
+)
+if exist "%~dp0librime\plugins\mochi" rmdir /s /q "%~dp0librime\plugins\mochi"
+xcopy /e /i /q /y "%PLUGIN_SRC%" "%~dp0librime\plugins\mochi" >nul
+if errorlevel 1 exit /b 5
+echo Synced src\ime-plugin -^> librime\plugins\mochi
+
 rem This session sets NoDefaultCurrentDirectoryInExePath=1, which makes cmd
 rem refuse to resolve bare names like "build.bat" from the CWD. Clear it for
 rem this process tree so librime's official scripts work as designed.
