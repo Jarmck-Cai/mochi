@@ -21,7 +21,7 @@
 
 ## 进行中
 
-- translator 编译实测：准备工作全部完成（librime+deps 已克隆、MochiTranslator 源码与 build-all.ps1 一键脚本就绪，见 experiments/003-translator-poc/README.md），**卡在本机无 C++ 工具链**——需安装 VS Build Tools + CMake（见"阻塞"）
+- **translator 编译实测**：工具链已装好（VS Build Tools 2022 + CMake）。构建脚本三个坑已修复：① ps1 需 UTF-8 BOM；② vcvars/VsDevCmd 会切换工作目录，cd 必须放它之后；③ **本开发会话注入 NoDefaultCurrentDirectoryInExePath=1**，cmd 拒绝裸名调用 build.bat（已在 build-steps.cmd 内清除）。恢复方式：跑 `cmd /c experiments\003-translator-poc\build-steps.cmd all`（约 15-40 分钟），成功后用 rime_api_console 喂 `nihao` 实测（验证方法见 experiments/003-translator-poc/README.md），数据写回 ADR-001
 
 ## 下一步（按优先级）
 

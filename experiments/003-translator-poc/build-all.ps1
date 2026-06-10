@@ -1,4 +1,4 @@
-# Mochi translator PoC 一键构建脚本（在装好 VS2022 Build Tools + CMake 后运行）
+﻿# Mochi translator PoC 一键构建脚本（在装好 VS2022 Build Tools + CMake 后运行）
 # 用法：powershell -ExecutionPolicy Bypass -File build-all.ps1
 # 可选：-DelayMs 15  （运行 console 时模拟 Query 内 15ms 同步延迟）
 param(
@@ -42,20 +42,20 @@ if (-not (Test-Path "$boostDir\boost")) {
     "解压..."
     tar -xzf $tgz -C (Join-Path $librime 'deps')
     Rename-Item (Join-Path $librime "deps\$tarball") "boost-$boostVer"
-    Push-Location $boostDir
-    cmd /c "bootstrap.bat && b2 headers"
-    Pop-Location
+    # cd /d inside cmd: do not rely on cwd inheritance (breaks in nested hosts)
+    cmd /c "cd /d `"$boostDir`" && bootstrap.bat && b2 headers"
+    if ($LASTEXITCODE) { throw "Boost bootstrap/headers failed (exit $LASTEXITCODE)" }
 }
 
 # ---- 3. 构建 deps + librime（Developer 环境下跑官方 build.bat）----
 if (-not $SkipBuild) {
     $vcvars = Join-Path $vsPath 'VC\Auxiliary\Build\vcvars64.bat'
-    Push-Location $librime
-    cmd /c "`"$vcvars`" && build.bat deps"
-    if ($LASTEXITCODE) { Pop-Location; throw "deps 构建失败（exit $LASTEXITCODE）" }
-    cmd /c "`"$vcvars`" && build.bat librime"
-    if ($LASTEXITCODE) { Pop-Location; throw "librime 构建失败（exit $LASTEXITCODE）" }
-    Pop-Location
+    # vcvars (VsDevCmd) may change the working directory -> cd AFTER it, not before
+    $env:VSCMD_START_DIR = $librime
+    cmd /c "`"$vcvars`" && cd /d `"$librime`" && build.bat deps"
+    if ($LASTEXITCODE) { throw "deps 构建失败（exit $LASTEXITCODE）" }
+    cmd /c "`"$vcvars`" && cd /d `"$librime`" && build.bat librime"
+    if ($LASTEXITCODE) { throw "librime 构建失败（exit $LASTEXITCODE）" }
 }
 
 # ---- 4. 部署最小 schema 并启动 rime_api_console ----
