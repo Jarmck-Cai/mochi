@@ -296,15 +296,34 @@ fn materialize(nodes: &[Node], mut idx: i32, score: f64) -> DecodeResult {
         }
         text.push_str(node.text);
         prev_en = node.en;
-        if node.completed {
-            completed = true;
-            ghost = ghost_of(node.text, node.pinyin, node.typed_len as usize);
-        }
         fuzzy |= node.fuzzy;
         if !preedit.is_empty() {
             preedit.push(' ');
         }
-        preedit.push_str(node.pinyin);
+        if node.completed {
+            completed = true;
+            ghost = ghost_of(node.text, node.pinyin, node.typed_len as usize);
+            // boundary marker in reading space: "shang xia w‥en" — the
+            // preedit line (candidate window AND inline composition) shows
+            // exactly where the user's own typing ended. Display-only;
+            // committed text comes from `text`.
+            let mut budget = node.typed_len as usize;
+            for c in node.pinyin.chars() {
+                if budget == 0 {
+                    preedit.push('‥');
+                    budget = usize::MAX; // marker placed once
+                }
+                if c != ' ' && budget != usize::MAX {
+                    budget -= 1;
+                }
+                preedit.push(c);
+            }
+            if budget == 0 {
+                preedit.push('‥'); // typed exactly consumed (defensive)
+            }
+        } else {
+            preedit.push_str(node.pinyin);
+        }
     }
     DecodeResult {
         text,
@@ -375,7 +394,8 @@ mod tests {
         // a prefix of ce -> 测), the literal raw-tail variant stays available
         let r = top("woyaoc", 5);
         assert_eq!(r[0].text, "我要测");
-        assert_eq!(r[0].preedit, "wo yao ce");
+        // ‥ marks where the user's own typing ended (display-only)
+        assert_eq!(r[0].preedit, "wo yao c‥e");
         assert!(r.iter().any(|c| c.text == "我要c"), "raw tail must survive");
     }
 
