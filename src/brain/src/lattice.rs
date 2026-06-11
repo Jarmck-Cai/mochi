@@ -33,12 +33,23 @@ pub struct Entry {
     pub lm_token: u32,
 }
 
+/// FxHash of a byte slice (prefix-set key). Storing 8-byte hashes instead
+/// of owned strings keeps the 4.5M-prefix set (essay-sized dict) cheap to
+/// build and query; a collision only costs one extra entries.get miss.
+#[inline]
+fn prefix_hash(bytes: &[u8]) -> u64 {
+    use std::hash::Hasher;
+    let mut h = rustc_hash::FxHasher::default();
+    h.write(bytes);
+    h.finish()
+}
+
 /// Exact-match dictionary with prefix-based early stopping
 /// (lattice.py `StringMatcher`).
 #[derive(Default)]
 pub struct Matcher {
     entries: FxHashMap<Box<str>, Vec<Entry>>,
-    prefixes: FxHashSet<Box<str>>,
+    prefixes: FxHashSet<u64>,
     max_len: usize,
 }
 
@@ -49,9 +60,7 @@ impl Matcher {
         }
         self.entries.entry(key.into()).or_default().push(entry);
         for i in 1..=key.len() {
-            if !self.prefixes.contains(&key[..i]) {
-                self.prefixes.insert(key[..i].into());
-            }
+            self.prefixes.insert(prefix_hash(&key.as_bytes()[..i]));
         }
         self.max_len = self.max_len.max(key.len());
     }
@@ -68,7 +77,7 @@ impl Matcher {
         let limit = keys.len().min(start + self.max_len);
         for end in (start + 1)..=limit {
             let sub = &keys[start..end];
-            if !self.prefixes.contains(sub) {
+            if !self.prefixes.contains(&prefix_hash(sub.as_bytes())) {
                 break;
             }
             if let Some(entries) = self.entries.get(sub) {
@@ -97,9 +106,7 @@ impl Matcher {
                 bytes += e.text.len() + e.pinyin.len() + 40;
             }
         }
-        for p in &self.prefixes {
-            bytes += p.len() + 40;
-        }
+        bytes += self.prefixes.len() * 10; // u64 hash + set overhead
         bytes
     }
 }

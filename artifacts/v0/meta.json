@@ -1,20 +1,24 @@
 {
   "v": 0,
-  "built_at": "2026-06-10T22:10:26+00:00",
+  "built_at": "2026-06-11T13:41:30+00:00",
   "sources": {
     "dict": "rime pinyin_simp (data/dict/pinyin_simp.dict.yaml)",
     "corpus": "SIGHAN bakeoff pku+msr (data/general/, full, no holdout)",
-    "english": "google-10000-english (data/english/google-10000-english.txt)"
+    "english": "google-10000-english (data/english/google-10000-english.txt)",
+    "essay": "rime essay 八股文 (data/dict/essay.txt, opencc t2s)"
   },
   "params": {
     "backoff": "stupid:0.4",
-    "min_trigram": 1.0
+    "min_trigram": 1.0,
+    "essay_lambda": 1.0
   },
   "counts": {
-    "dict": 65121,
-    "ngram1": 90476,
+    "dict": 372716,
+    "ngram1": 405591,
     "ngram2": 955754,
     "ngram3": 235688,
-    "english": 10000
+    "english": 10000,
+    "essay_dict_words": 307595,
+    "essay_words": 373564
   }
 }

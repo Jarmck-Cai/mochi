@@ -47,4 +47,15 @@ powershell -ExecutionPolicy Bypass -File deploy-weasel.ps1
 
 ## 结论
 
-（部署与真实使用后回填）
+- **2026-06-11 部署成功**：Weasel 0.17.4 + 我们的 rime.dll（librime 1.17.0
+  master + mochi merged plugin），模块注册实证（服务端日志
+  `registering component: mochi_translator`）。用户已真实打字，场景信号
+  （notepad.exe / windowsterminal.exe）与即时学习全链路工作
+- **首日反馈驱动两项改进**：① 候选 5→24 + 翻页（schema v0.3，page_size 9，
+  -/= 翻页）；② 通用层补 rime essay 八股文底座（opencc 繁→简 + pypinyin
+  注音，词典 6.5 万→37.3 万词条，unigram λ=1.0 混权）——"有些常用词"类
+  缺词案例修复，用户语料 80 句 A/B：通用层 top-1 42.5%→46.2%（5 胜 2 负）。
+  加载 11.8s→1.15s（前缀集改哈希），查询延迟无回归（len20 中位 189µs）
+- 已知观察：commit 学习会记下用户上屏的错词（引用错例场景），目前靠
+  essay 底座 + 正确选择的分数压制；信号分级仍在待办
+- 真实使用对比微软拼音（验收协议见上）进行中

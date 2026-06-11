@@ -81,7 +81,9 @@ fn parse_cli() -> Cli {
         artifacts: default_artifacts_dir(),
         user_data: None,
         beam_width: 12,
-        topn: 5,
+        // enough for ~3 pages in the IME menu: when the top guess is wrong,
+        // the fix should be a page-flip away, not a retype
+        topn: 24,
         bench: false,
         decode: Vec::new(),
     };
