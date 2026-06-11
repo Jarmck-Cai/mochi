@@ -13,10 +13,12 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArcKind {
-    PyWord,   // multi-char dictionary word via pinyin
-    PyChar,   // single hanzi via pinyin
-    EnWord,   // general-vocabulary English word
-    Fallback, // single raw letter, last resort
+    PyWord,     // multi-char dictionary word via pinyin
+    PyChar,     // single hanzi via pinyin
+    PyPersonal, // personal-lexicon Chinese word (OOV in the static dict)
+    EnWord,     // general-vocabulary English word
+    EnPersonal, // personal-lexicon English word (user's own terms/casing)
+    Fallback,   // single raw letter, last resort
 }
 
 /// One word stored under a matcher key.
@@ -74,6 +76,18 @@ impl Matcher {
         }
     }
 
+    /// Update the surface form of an existing entry (the personal layer
+    /// tracks the user's preferred casing, which can change over time).
+    pub fn set_text(&mut self, key: &str, lm_token: u32, text: &str) {
+        if let Some(entries) = self.entries.get_mut(key) {
+            for e in entries.iter_mut() {
+                if e.lm_token == lm_token {
+                    e.text = text.into();
+                }
+            }
+        }
+    }
+
     pub fn est_bytes(&self) -> usize {
         let mut bytes = 0;
         for (k, v) in &self.entries {
@@ -100,6 +114,14 @@ pub struct Arc<'a> {
     pub kind: ArcKind,
 }
 
+/// Personal-layer matchers joining the lattice (borrowed from the
+/// PersonalStore read guard for the duration of one decode).
+#[derive(Clone, Copy)]
+pub struct PersonalMatchers<'p> {
+    pub zh: &'p Matcher,
+    pub en: &'p Matcher,
+}
+
 pub struct LatticeBuilder {
     pub char_matcher: Matcher,
     pub word_matcher: Matcher,
@@ -111,9 +133,17 @@ pub struct LatticeBuilder {
 impl LatticeBuilder {
     /// Arcs grouped by start byte position; every position is covered.
     /// `keys` must be ASCII (the IME segment is always a-z in practice).
-    pub fn build<'a>(&'a self, keys: &'a str) -> Vec<Vec<Arc<'a>>> {
+    /// `personal` adds the user's own words (lattice.py: personal English
+    /// arcs shadow same-span general ones; personal Chinese words are
+    /// dict-OOV by construction, so no dedup is needed there).
+    pub fn build<'a>(
+        &'a self,
+        keys: &'a str,
+        personal: Option<PersonalMatchers<'a>>,
+    ) -> Vec<Vec<Arc<'a>>> {
         let n = keys.len();
         let mut arcs: Vec<Vec<Arc<'a>>> = (0..n).map(|_| Vec::new()).collect();
+        let mut seen_en: Vec<(usize, u32)> = Vec::new();
         for i in 0..n {
             let out = &mut arcs[i];
             self.char_matcher.for_matches(keys, i, |end, entries| {
@@ -138,8 +168,37 @@ impl LatticeBuilder {
                     });
                 }
             });
+            seen_en.clear();
+            if let Some(p) = personal {
+                p.zh.for_matches(keys, i, |end, entries| {
+                    for e in entries {
+                        out.push(Arc {
+                            end,
+                            text: &e.text,
+                            pinyin: &e.pinyin,
+                            lm_token: e.lm_token,
+                            kind: ArcKind::PyPersonal,
+                        });
+                    }
+                });
+                p.en.for_matches(keys, i, |end, entries| {
+                    for e in entries {
+                        out.push(Arc {
+                            end,
+                            text: &e.text,
+                            pinyin: &keys[i..end],
+                            lm_token: e.lm_token,
+                            kind: ArcKind::EnPersonal,
+                        });
+                        seen_en.push((end, e.lm_token));
+                    }
+                });
+            }
             self.en_matcher.for_matches(keys, i, |end, entries| {
                 for e in entries {
+                    if seen_en.contains(&(end, e.lm_token)) {
+                        continue;
+                    }
                     out.push(Arc {
                         end,
                         text: &e.text,
@@ -245,7 +304,7 @@ mod tests {
     #[test]
     fn lattice_lays_char_word_english_arcs() {
         let arts = mini_artifacts();
-        let arcs = arts.builder.build("nihao");
+        let arcs = arts.builder.build("nihao", None);
         let at0: Vec<(&str, ArcKind, usize)> =
             arcs[0].iter().map(|a| (a.text, a.kind, a.end)).collect();
         // char arc 你 over "ni" and word arc 你好 over "nihao"
@@ -256,16 +315,61 @@ mod tests {
         assert_eq!(nihao.pinyin, "ni hao");
 
         // English arc: "gan" is both pinyin (敢) and an English word
-        let arcs = arts.builder.build("gan");
+        let arcs = arts.builder.build("gan", None);
         let kinds: Vec<(&str, ArcKind)> = arcs[0].iter().map(|a| (a.text, a.kind)).collect();
         assert!(kinds.contains(&("敢", ArcKind::PyChar)));
         assert!(kinds.contains(&("gan", ArcKind::EnWord)));
     }
 
     #[test]
+    fn personal_arcs_join_and_shadow_general_english() {
+        let arts = mini_artifacts();
+        let mut zh = Matcher::default();
+        zh.add(
+            "suiji",
+            Entry {
+                text: "随机".into(),
+                pinyin: "sui ji".into(),
+                lm_token: 900,
+            },
+        );
+        let mut en = Matcher::default();
+        // same lm_token as the general "test" entry -> general arc shadowed
+        let test_token = arts
+            .builder
+            .build("test", None)[0]
+            .iter()
+            .find(|a| a.kind == ArcKind::EnWord && a.text == "test")
+            .expect("general english arc for 'test'")
+            .lm_token;
+        en.add(
+            "test",
+            Entry {
+                text: "TEST".into(),
+                pinyin: "test".into(),
+                lm_token: test_token,
+            },
+        );
+        let personal = PersonalMatchers { zh: &zh, en: &en };
+        let arcs = arts.builder.build("test", Some(personal));
+        let en_arcs: Vec<(&str, ArcKind)> = arcs[0]
+            .iter()
+            .filter(|a| a.end == 4)
+            .map(|a| (a.text, a.kind))
+            .collect();
+        assert!(en_arcs.contains(&("TEST", ArcKind::EnPersonal)));
+        assert!(!en_arcs.contains(&("test", ArcKind::EnWord)));
+
+        let arcs = arts.builder.build("suiji", Some(personal));
+        assert!(arcs[0]
+            .iter()
+            .any(|a| a.text == "随机" && a.kind == ArcKind::PyPersonal && a.end == 5));
+    }
+
+    #[test]
     fn lattice_fallback_covers_unmatched_positions() {
         let arts = mini_artifacts();
-        let arcs = arts.builder.build("nivx"); // v/x start no entry in mini dict
+        let arcs = arts.builder.build("nivx", None); // v/x start no entry in mini dict
         assert_eq!(arcs[2].len(), 1);
         assert_eq!(arcs[2][0].kind, ArcKind::Fallback);
         assert_eq!(arcs[2][0].text, "v");

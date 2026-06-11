@@ -104,14 +104,16 @@ impl BackoffTrigramLm {
             if h1 != crate::interner::UNK {
                 if let Some(&c2) = self.bi.get(&bi_key(h1, w)) {
                     if c2 > 0.0 {
-                        let denom = self.uni_hist[h1 as usize];
+                        // .get(): personal-layer tokens are interned after
+                        // load, so ids can exceed the load-time vocab size.
+                        let denom = self.uni_hist.get(h1 as usize).copied().unwrap_or(0.0);
                         if denom > 0.0 {
                             return self.log_alpha + (c2 as f64 / denom as f64).log10();
                         }
                     }
                 }
             }
-            let c1 = self.uni[w as usize];
+            let c1 = self.uni.get(w as usize).copied().unwrap_or(0.0);
             if c1 > 0.0 && self.total > 0.0 {
                 return 2.0 * self.log_alpha + (c1 as f64 / self.total).log10();
             }
@@ -137,8 +139,8 @@ impl BackoffTrigramLm {
     }
 }
 
-/// λ₂ personal layer slot (DESIGN.md §3). M2-3 will implement the real
-/// time-decayed per-scene personal LM + lexicon; the decoder already
+/// λ₂ personal layer slot (DESIGN.md §3), implemented by
+/// `personal::PersonalView` (scene-bucketed, time-decayed). The decoder
 /// combines it in linear probability space exactly like decoder.py:
 ///
 ///     P(w|h) = μ_g·P_general + μ_p·P_personal,  + λ_lex·lexicon_bonus(w)
@@ -153,7 +155,9 @@ pub trait PersonalLayer: Send + Sync {
     }
 }
 
-/// Null object until M2-3 (decoder.py `EmptyLM` + empty lexicon).
+/// Null object (decoder.py `EmptyLM` + empty lexicon); the production
+/// personal layer lives in personal.rs, this remains for baseline tests.
+#[cfg_attr(not(test), allow(dead_code))]
 pub struct NoPersonalLayer;
 
 impl PersonalLayer for NoPersonalLayer {}

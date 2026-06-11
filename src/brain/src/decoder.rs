@@ -9,7 +9,7 @@
 
 use rustc_hash::FxHashMap;
 
-use crate::lattice::{Arc, ArcKind, LatticeBuilder};
+use crate::lattice::{Arc, ArcKind, LatticeBuilder, PersonalMatchers};
 use crate::lm::{BackoffTrigramLm, PersonalLayer};
 
 /// Log10 prior per arc type (decoder.py `DEFAULT_ARC_PRIOR`): dictionary
@@ -19,7 +19,9 @@ use crate::lm::{BackoffTrigramLm, PersonalLayer};
 pub struct ArcPriors {
     pub py_word: f64,
     pub py_char: f64,
+    pub py_personal: f64,
     pub en_word: f64,
+    pub en_personal: f64,
     pub fallback: f64,
 }
 
@@ -28,7 +30,9 @@ impl Default for ArcPriors {
         Self {
             py_word: 0.0,
             py_char: -0.6,
+            py_personal: 0.0,
             en_word: -3.0,
+            en_personal: -1.0, // user's own terms pay a smaller switch cost
             fallback: -12.0,
         }
     }
@@ -40,7 +44,9 @@ impl ArcPriors {
         match kind {
             ArcKind::PyWord => self.py_word,
             ArcKind::PyChar => self.py_char,
+            ArcKind::PyPersonal => self.py_personal,
             ArcKind::EnWord => self.en_word,
+            ArcKind::EnPersonal => self.en_personal,
             ArcKind::Fallback => self.fallback,
         }
     }
@@ -56,6 +62,8 @@ pub struct Scorer<'a> {
 }
 
 impl<'a> Scorer<'a> {
+    /// Baseline scorer (tests/diagnostics); production uses `full`.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn general_only(lm: &'a BackoffTrigramLm, personal: &'a dyn PersonalLayer) -> Self {
         Self {
             lm,
@@ -64,6 +72,19 @@ impl<'a> Scorer<'a> {
             mu_general: 1.0,
             mu_personal: 0.0,
             lambda_lexicon: 0.0,
+        }
+    }
+
+    /// The winning configuration of experiment 001 ("full(+LM+lexicon)",
+    /// run_experiment.py): the production scorer since M2-3.
+    pub fn full(lm: &'a BackoffTrigramLm, personal: &'a dyn PersonalLayer) -> Self {
+        Self {
+            lm,
+            personal,
+            priors: ArcPriors::default(),
+            mu_general: 0.65,
+            mu_personal: 0.35,
+            lambda_lexicon: 0.8,
         }
     }
 
@@ -115,6 +136,7 @@ pub struct DecodeResult {
 pub fn decode_topn(
     keys: &str,
     builder: &LatticeBuilder,
+    personal_arcs: Option<PersonalMatchers>,
     scorer: &Scorer,
     bos: u32,
     beam_width: usize,
@@ -124,7 +146,7 @@ pub fn decode_topn(
     if n == 0 || !keys.is_ascii() {
         return Vec::new();
     }
-    let arcs = builder.build(keys);
+    let arcs = builder.build(keys, personal_arcs);
     let mut nodes: Vec<Node> = Vec::with_capacity(64);
     let mut beams: Vec<FxHashMap<(u32, u32), Hyp>> = (0..=n).map(|_| FxHashMap::default()).collect();
     beams[0].insert((bos, bos), Hyp { score: 0.0, node: -1 });
@@ -215,7 +237,7 @@ mod tests {
     fn top(keys: &str, n: usize) -> Vec<DecodeResult> {
         let arts = mini_artifacts();
         let scorer = Scorer::general_only(&arts.lm, &NO_PERSONAL);
-        decode_topn(keys, &arts.builder, &scorer, arts.bos, 12, n)
+        decode_topn(keys, &arts.builder, None, &scorer, arts.bos, 12, n)
     }
 
     #[test]

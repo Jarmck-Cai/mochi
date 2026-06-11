@@ -14,6 +14,7 @@ mod engine;
 mod interner;
 mod lattice;
 mod lm;
+mod personal;
 mod protocol;
 
 use std::path::PathBuf;
@@ -68,6 +69,7 @@ fn default_artifacts_dir() -> PathBuf {
 
 struct Cli {
     artifacts: PathBuf,
+    user_data: Option<PathBuf>,
     beam_width: usize,
     topn: usize,
     bench: bool,
@@ -77,12 +79,14 @@ struct Cli {
 fn parse_cli() -> Cli {
     let mut cli = Cli {
         artifacts: default_artifacts_dir(),
+        user_data: None,
         beam_width: 12,
         topn: 5,
         bench: false,
         decode: Vec::new(),
     };
     let mut args = std::env::args().skip(1);
+    let mut no_user_data = false;
     while let Some(arg) = args.next() {
         let mut take = |what: &str| {
             args.next()
@@ -90,6 +94,8 @@ fn parse_cli() -> Cli {
         };
         match arg.as_str() {
             "--artifacts" => cli.artifacts = PathBuf::from(take("--artifacts")),
+            "--user-data" => cli.user_data = Some(PathBuf::from(take("--user-data"))),
+            "--no-user-data" => no_user_data = true,
             "--beam" => cli.beam_width = take("--beam").parse().expect("--beam: number"),
             "--topn" => cli.topn = take("--topn").parse().expect("--topn: number"),
             "--bench" => cli.bench = true,
@@ -99,13 +105,23 @@ fn parse_cli() -> Cli {
             }
             other => {
                 eprintln!(
-                    "usage: mochi-brain [--artifacts <dir>] [--beam N] [--topn N] \
-                     [--bench | --decode <keys>...]\nunknown argument: {}",
+                    "usage: mochi-brain [--artifacts <dir>] [--user-data <dir> | --no-user-data] \
+                     [--beam N] [--topn N] [--bench | --decode <keys>...]\nunknown argument: {}",
                     other
                 );
                 std::process::exit(2);
             }
         }
+    }
+    // Personal memory lives next to the artifacts by default ("user_data"
+    // sibling); --no-user-data runs stateless (bench/parity checks).
+    if cli.user_data.is_none() && !no_user_data {
+        let dir = cli
+            .artifacts
+            .parent()
+            .map(|p| p.join("..").join("user_data"))
+            .unwrap_or_else(|| PathBuf::from("user_data"));
+        cli.user_data = Some(dir);
     }
     cli
 }
@@ -121,13 +137,13 @@ fn run_bench(engine: &Engine) {
         let keys = &BASE[..len];
         // warmup
         for _ in 0..5 {
-            std::hint::black_box(engine.query(keys));
+            std::hint::black_box(engine.query(keys, None));
         }
         let mut samples = Vec::with_capacity(ITERS);
         let mut top1 = String::new();
         for _ in 0..ITERS {
             let t0 = std::time::Instant::now();
-            let cands = std::hint::black_box(engine.query(keys));
+            let cands = std::hint::black_box(engine.query(keys, None));
             samples.push(t0.elapsed().as_micros() as u64);
             if top1.is_empty() {
                 if let Some(c) = cands.first() {
@@ -144,7 +160,12 @@ fn run_bench(engine: &Engine) {
 
 fn main() {
     let cli = parse_cli();
-    let engine = match Engine::load(&cli.artifacts, cli.beam_width, cli.topn) {
+    let engine = match Engine::load(
+        &cli.artifacts,
+        cli.user_data.as_deref(),
+        cli.beam_width,
+        cli.topn,
+    ) {
         Ok(e) => Arc::new(e),
         Err(e) => {
             eprintln!("[brain] failed to load artifacts: {}", e);
@@ -159,7 +180,7 @@ fn main() {
         // one-shot decode for parity checks / debugging: keys<TAB>text<TAB>score
         for keys in &cli.decode {
             let t0 = std::time::Instant::now();
-            let cands = engine.query(keys);
+            let cands = engine.query(keys, None);
             let us = t0.elapsed().as_micros();
             for (i, c) in cands.iter().enumerate() {
                 println!(

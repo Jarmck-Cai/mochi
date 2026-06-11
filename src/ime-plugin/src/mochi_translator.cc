@@ -6,6 +6,8 @@
 #include <thread>
 
 #include <rime/candidate.h>
+#include <rime/context.h>
+#include <rime/engine.h>
 #include <rime/segmentation.h>
 #include <rime/translation.h>
 
@@ -17,9 +19,39 @@ MochiTranslator::MochiTranslator(const Ticket& ticket) : Translator(ticket) {
   if (const char* env = std::getenv("MOCHI_QUERY_DELAY_MS")) {
     delay_ms_ = std::atoi(env);
   }
+  // Instant-learning input: report every committed text to the brain.
+  // The notifier fires before Context::Clear(), so GetCommitText() and
+  // input() are both still valid inside the handler.
+  if (engine_ && engine_->context()) {
+    commit_connection_ = engine_->context()->commit_notifier().connect(
+        [this](Context* ctx) { OnCommit(ctx); });
+  }
   LOG(INFO) << "[mochi] translator created, simulated delay = " << delay_ms_
             << "ms";
   std::fprintf(stderr, "[mochi] translator created, delay=%dms\n", delay_ms_);
+}
+
+MochiTranslator::~MochiTranslator() {
+  commit_connection_.disconnect();
+}
+
+void MochiTranslator::OnCommit(Context* ctx) {
+  const std::string text = ctx->GetCommitText();
+  if (text.empty())
+    return;
+  // ipc-v0 commit: fire-and-forget semantically, but the response must be
+  // read to keep the request/response message stream in sync (same budget
+  // and degradation rules as query; a lost commit is acceptable).
+  std::string request = "{\"v\":1,\"method\":\"commit\",\"text\":\"" +
+                        json::Escape(text) + "\",\"input\":\"" +
+                        json::Escape(ctx->input()) +
+                        "\",\"scene\":{}}";
+  std::string response;
+  const bool ok = brain_.Roundtrip(request, &response);
+  LOG(INFO) << "[mochi] commit text='" << text << "' input='" << ctx->input()
+            << "' sent=" << (ok ? "yes" : "no");
+  std::fprintf(stderr, "[mochi] commit text='%s' input='%s' sent=%s\n",
+               text.c_str(), ctx->input().c_str(), ok ? "yes" : "no");
 }
 
 an<Translation> MochiTranslator::Query(const string& input,

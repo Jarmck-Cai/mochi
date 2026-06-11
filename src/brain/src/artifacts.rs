@@ -8,7 +8,7 @@
 use std::path::Path;
 use std::time::Instant;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::interner::Interner;
 use crate::lattice::{Entry, LatticeBuilder, Matcher, SyllableSet};
@@ -36,9 +36,13 @@ pub struct Artifacts {
     #[allow(dead_code)]
     pub syllables: SyllableSet,
     pub bos: u32,
-    /// Kept for M2-3: the personal layer interns new tokens at commit time.
-    #[allow(dead_code)]
     pub interner: Interner,
+    /// Tokens that already have a lattice arc via the static dictionary;
+    /// the personal layer only adds arcs for words outside this set.
+    pub dict_tokens: FxHashSet<u32>,
+    /// hanzi -> known toneless syllables (longest first), built from all
+    /// single-char dict entries; used to align commit text with raw keys.
+    pub char_pinyin: FxHashMap<char, Vec<Box<str>>>,
     pub stats: LoadStats,
 }
 
@@ -60,8 +64,14 @@ impl Artifacts {
         let bos = interner.intern("<s>");
 
         let mut lm = parse_ngram(ngram, &mut interner)?;
-        let (char_matcher, word_matcher, syllables, dict_entries) =
-            parse_dict(dict, &mut interner)?;
+        let DictTables {
+            char_matcher,
+            word_matcher,
+            syllables,
+            dict_entries,
+            dict_tokens,
+            char_pinyin,
+        } = parse_dict(dict, &mut interner)?;
         let (en_matcher, english_words) = parse_english(english, &mut interner)?;
 
         let mut letter_tokens = [0u32; 26];
@@ -97,6 +107,8 @@ impl Artifacts {
             syllables,
             bos,
             interner,
+            dict_tokens,
+            char_pinyin,
             stats,
         })
     }
@@ -153,18 +165,24 @@ fn parse_ngram(text: &str, interner: &mut Interner) -> Result<BackoffTrigramLm, 
     Ok(lm)
 }
 
+struct DictTables {
+    char_matcher: Matcher,
+    word_matcher: Matcher,
+    syllables: SyllableSet,
+    dict_entries: usize,
+    dict_tokens: FxHashSet<u32>,
+    char_pinyin: FxHashMap<char, Vec<Box<str>>>,
+}
+
 /// dict.tsv: `key<TAB>text<TAB>weight`, key = space-separated syllables.
 /// Splits entries into char/word matchers keeping the top-N per pinyin key
 /// by (weight desc, text desc), mirroring lattice.py.
-#[allow(clippy::type_complexity)]
-fn parse_dict(
-    text: &str,
-    interner: &mut Interner,
-) -> Result<(Matcher, Matcher, SyllableSet, usize), String> {
+fn parse_dict(text: &str, interner: &mut Interner) -> Result<DictTables, String> {
     type Bucket = FxHashMap<String, Vec<(i64, Box<str>, Box<str>)>>; // concat key -> (weight, text, spaced)
     let mut chars: Bucket = FxHashMap::default();
     let mut words: Bucket = FxHashMap::default();
     let mut syllables = SyllableSet::default();
+    let mut char_pinyin: FxHashMap<char, Vec<Box<str>>> = FxHashMap::default();
     let mut n = 0usize;
     for (no, line) in text.lines().enumerate() {
         if line.is_empty() || line.starts_with('#') {
@@ -181,6 +199,13 @@ fn parse_dict(
         }
         let concat: String = key.split(' ').collect();
         let target = if word.chars().count() == 1 {
+            // reading inventory uses ALL single-char entries (no top-N cap):
+            // alignment must recognize rare readings the lattice may not offer
+            let c = word.chars().next().unwrap();
+            let readings = char_pinyin.entry(c).or_default();
+            if !readings.iter().any(|s| s.as_ref() == concat.as_str()) {
+                readings.push(concat.as_str().into());
+            }
             &mut chars
         } else {
             &mut words
@@ -191,8 +216,13 @@ fn parse_dict(
             .push((weight, word.into(), key.into()));
         n += 1;
     }
+    // longest-first so greedy alignment prefers maximal syllables
+    for readings in char_pinyin.values_mut() {
+        readings.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
+    }
     let mut char_m = Matcher::default();
     let mut word_m = Matcher::default();
+    let mut dict_tokens = FxHashSet::default();
     for (bucket, matcher, cap) in [
         (chars, &mut char_m, MAX_CHARS_PER_KEY),
         (words, &mut word_m, MAX_WORDS_PER_KEY),
@@ -202,6 +232,7 @@ fn parse_dict(
             cands.truncate(cap);
             for (_, text, spaced) in cands {
                 let lm_token = interner.intern(&text);
+                dict_tokens.insert(lm_token);
                 matcher.add(
                     &key,
                     Entry {
@@ -213,7 +244,14 @@ fn parse_dict(
             }
         }
     }
-    Ok((char_m, word_m, syllables, n))
+    Ok(DictTables {
+        char_matcher: char_m,
+        word_matcher: word_m,
+        syllables,
+        dict_entries: n,
+        dict_tokens,
+        char_pinyin,
+    })
 }
 
 /// english.tsv: `word<TAB>rank`. Match keys are lowercase, len >= 2,
@@ -274,6 +312,14 @@ wen\t文\t500
 shu ru\t输入\t900
 shu\t书\t400
 ru\t入\t200
+sui ji\t随即\t900
+sui ji\t随机\t800
+ti du\t梯度\t200
+sui\t随\t500
+ji\t机\t400
+ji\t即\t350
+ti\t梯\t100
+du\t度\t300
 ";
 
     const MINI_NGRAM: &str = "\
@@ -303,6 +349,14 @@ ru\t入\t200
 1\t入\t40
 1\t文\t90
 1\t中\t400
+1\t随即\t200
+1\t随机\t50
+1\t梯度\t30
+1\t随\t20
+1\t机\t30
+1\t即\t25
+1\t梯\t5
+1\t度\t40
 2\t<s> 你好\t200
 2\t<s> 我\t300
 2\t我 要\t200
@@ -330,8 +384,8 @@ a\t4
     #[test]
     fn parses_mini_artifacts_counts_and_headers() {
         let a = mini_artifacts();
-        assert_eq!(a.stats.dict_entries, 23);
-        assert_eq!(a.stats.ngrams, (23, 5, 4));
+        assert_eq!(a.stats.dict_entries, 31);
+        assert_eq!(a.stats.ngrams, (31, 5, 4));
         // "a" is filtered (len < 2), so 3 English entries
         assert_eq!(a.stats.english_words, 3);
         assert!((a.lm.alpha - 0.4).abs() < 1e-12);

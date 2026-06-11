@@ -1,10 +1,11 @@
 //! ipc-v0 message types and dispatch (docs/specs/ipc-v0.md).
 //!
 //! Behavior:
-//! - `query`  -> top-N candidates from the lattice decoder (engine.rs);
+//! - `query`  -> top-N candidates from the lattice decoder (engine.rs),
+//!   scored against the scene bucket named by `scene.app`;
 //!   elapsed_us covers lattice build + beam search + serialization prep
-//! - `commit` -> log and reply `{"v":1,"ok":true}` (immediate learning lands
-//!   here in M2-3 via the PersonalLayer)
+//! - `commit` -> instant learning into the personal store (personal.rs),
+//!   then `{"v":1,"ok":true}`; the very next query sees the update
 //! - unknown `v` / `method` / malformed JSON -> `{"v":1,"error":"unsupported"}`
 
 use serde::{Deserialize, Serialize};
@@ -93,12 +94,15 @@ pub fn handle_message(engine: &Engine, raw: &[u8]) -> Vec<u8> {
         }
     };
     match request {
-        Request::Query { v, input, .. } => {
+        Request::Query {
+            v, input, scene, ..
+        } => {
             if v != PROTOCOL_VERSION {
                 eprintln!("[brain] query with unsupported v={}", v);
                 return unsupported();
             }
-            let candidates = engine.query(&input);
+            let app = scene.as_ref().and_then(|s| s.app.as_deref());
+            let candidates = engine.query(&input, app);
             let elapsed_us = started.elapsed().as_micros() as u64;
             let response = QueryResponse {
                 v: PROTOCOL_VERSION,
@@ -114,17 +118,25 @@ pub fn handle_message(engine: &Engine, raw: &[u8]) -> Vec<u8> {
             );
             serde_json::to_vec(&response).expect("query response serializes")
         }
-        Request::Commit { v, text, input, .. } => {
+        Request::Commit {
+            v,
+            text,
+            input,
+            scene,
+        } => {
             if v != PROTOCOL_VERSION {
                 eprintln!("[brain] commit with unsupported v={}", v);
                 return unsupported();
             }
+            let app = scene.as_ref().and_then(|s| s.app.as_deref());
+            engine.commit(&text, input.as_deref(), app);
             let elapsed_us = started.elapsed().as_micros() as u64;
             eprintln!(
-                "[brain] commit text='{}' input='{}' elapsed={}us",
+                "[brain] commit text='{}' input='{}' learned in {}us ({})",
                 text,
                 input.as_deref().unwrap_or(""),
-                elapsed_us
+                elapsed_us,
+                engine.personal_stats(),
             );
             serde_json::to_vec(&OkResponse {
                 v: PROTOCOL_VERSION,
@@ -238,6 +250,20 @@ mod tests {
         let resp: OkResponse =
             serde_json::from_slice(&handle_message(&engine, raw.as_bytes())).unwrap();
         assert_eq!(resp, OkResponse { v: 1, ok: true });
+    }
+
+    #[test]
+    fn commit_then_query_learns_instantly() {
+        let engine = Engine::mini();
+        let q = br#"{"v":1,"method":"query","input":"suijitidu"}"#;
+        let before: QueryResponse = serde_json::from_slice(&handle_message(&engine, q)).unwrap();
+        assert_eq!(before.candidates[0].text, "随即梯度");
+        let c = r#"{"v":1,"method":"commit","text":"随机梯度","input":"suijitidu","scene":{"app":"code.exe"}}"#;
+        let ok: OkResponse =
+            serde_json::from_slice(&handle_message(&engine, c.as_bytes())).unwrap();
+        assert!(ok.ok);
+        let after: QueryResponse = serde_json::from_slice(&handle_message(&engine, q)).unwrap();
+        assert_eq!(after.candidates[0].text, "随机梯度");
     }
 
     #[test]

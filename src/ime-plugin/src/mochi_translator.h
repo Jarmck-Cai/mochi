@@ -5,6 +5,9 @@
 // on timeout / brain-down the segment simply yields no candidates and the
 // client backs off 2s before reconnecting — keystrokes are never blocked.
 //
+// Committed text is reported back over the same pipe (ipc-v0 `commit`) via
+// the context's commit notifier — the brain's instant-learning input.
+//
 // Env var MOCHI_QUERY_DELAY_MS (kept from the PoC): extra synchronous delay
 // injected inside Query, for feel/latency experiments.
 #pragma once
@@ -21,11 +24,15 @@ using namespace rime;
 class MochiTranslator : public Translator {
  public:
   explicit MochiTranslator(const Ticket& ticket);
+  ~MochiTranslator() override;
 
   an<Translation> Query(const string& input, const Segment& segment) override;
 
  private:
+  void OnCommit(Context* ctx);
+
   BrainClient brain_;
+  connection commit_connection_;
   int delay_ms_ = 0;          // simulated extra delay (ms), PoC-compatible
   long long call_count_ = 0;  // Query invocations on this instance
 };
