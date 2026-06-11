@@ -88,11 +88,29 @@ impl Engine {
             self.topn,
         )
         .into_iter()
-        .map(|r| Candidate {
-            text: r.text,
-            comment: String::new(),
-            preedit: r.preedit,
-            quality: r.score,
+        .map(|r| {
+            // The candidate window is the only place the user can SEE what
+            // the engine assumed: a completion shows "+«assumed letters»"
+            // (you typed up to here, the rest is ours), a fuzzy match
+            // shows "~" — without this, completed text reads as if the
+            // user had already typed it and they lose their place.
+            let comment = if r.completed {
+                let concat: String = r.preedit.chars().filter(|c| *c != ' ').collect();
+                match concat.get(input.len()..) {
+                    Some(assumed) if !assumed.is_empty() => format!("+{}", assumed),
+                    _ => "+".to_string(),
+                }
+            } else if r.fuzzy {
+                "~".to_string()
+            } else {
+                String::new()
+            };
+            Candidate {
+                text: r.text,
+                comment,
+                preedit: r.preedit,
+                quality: r.score,
+            }
         })
         .collect()
     }
@@ -124,6 +142,29 @@ mod tests {
         assert_eq!(cands[0].preedit, "ni hao");
         assert!(cands.len() <= 5);
         assert!(cands.windows(2).all(|w| w[0].quality >= w[1].quality));
+    }
+
+    /// What the engine assumed must be visible: completions carry
+    /// "+«assumed letters»", fuzzy matches carry "~", exact matches stay
+    /// clean — the user always knows where their own typing ended.
+    #[test]
+    fn comments_mark_completions_and_fuzzy() {
+        let e = Engine::mini();
+        let cands = e.query("nihaoc", None);
+        let completed = cands
+            .iter()
+            .find(|c| c.text == "你好测")
+            .expect("completion candidate");
+        assert_eq!(completed.comment, "+e");
+        let raw = cands.iter().find(|c| c.text == "你好c").expect("raw tail");
+        assert_eq!(raw.comment, "");
+
+        let cands = e.query("zongwen", None);
+        assert_eq!(cands[0].text, "中文");
+        assert_eq!(cands[0].comment, "~");
+
+        let exact = e.query("nihao", None);
+        assert_eq!(exact[0].comment, "");
     }
 
     #[test]

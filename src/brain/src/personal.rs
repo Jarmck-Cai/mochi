@@ -473,7 +473,17 @@ impl PersonalStore {
                 }
                 Unit::Ascii(surface) => {
                     let lower = surface.to_ascii_lowercase();
-                    if (2..=20).contains(&lower.len()) {
+                    // A long ASCII run that segments cleanly into pinyin is
+                    // almost surely ABANDONED INPUT committed raw (the user
+                    // lost their place mid-composition), not an English
+                    // word — learning it would haunt future completions
+                    // ("zidongbuquanhou" must not become vocabulary).
+                    let abandoned_pinyin = lower.len() >= 6
+                        && arts
+                            .syllables
+                            .segment(&lower)
+                            .is_some_and(|segs| segs.len() >= 3);
+                    if (2..=20).contains(&lower.len()) && !abandoned_pinyin {
                         let tok = self.token(arts, &lower);
                         current.push(tok);
                         *self.lex_en.entry(tok).or_insert(0.0) += weight;
@@ -962,6 +972,21 @@ mod tests {
             assert!(store.scenes.contains_key("weixin.exe"));
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn abandoned_raw_pinyin_is_not_learned_as_english() {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        // committed raw keystream (segments as ni-hao-ni-hao): not vocabulary
+        store.commit(&arts, "nihaonihao", Some("nihaonihao"), None);
+        store.commit(&arts, "nihaonihao", Some("nihaonihao"), None);
+        assert!(store.lex_en.is_empty(), "raw pinyin must not enter lexicon");
+        assert!(store.en_added.is_empty());
+        // a genuine English word still learns (does not segment as pinyin)
+        store.commit(&arts, "github", Some("github"), None);
+        store.commit(&arts, "github", Some("github"), None);
+        assert_eq!(store.en_added.len(), 1);
     }
 
     #[test]

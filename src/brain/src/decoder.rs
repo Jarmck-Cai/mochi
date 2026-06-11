@@ -149,13 +149,20 @@ struct Node<'a> {
     parent: i32,
     text: &'a str,
     pinyin: &'a str,
-    en: bool, // English-word node: spaces go between adjacent ones
+    en: bool,        // English-word node: spaces go between adjacent ones
+    completed: bool, // typing-ahead arc
+    fuzzy: bool,     // fuzzy-pinyin arc
 }
 
 pub struct DecodeResult {
     pub text: String,
     pub preedit: String,
     pub score: f64,
+    /// Path ends in a typing-ahead completion: the candidate contains
+    /// letters the user did NOT type — the UI must say so.
+    pub completed: bool,
+    /// Path crossed a fuzzy-pinyin arc.
+    pub fuzzy: bool,
 }
 
 /// N-best beam search. `bos` is the interned `<s>` id. Hypotheses ending at
@@ -211,6 +218,8 @@ pub fn decode_topn(
                         text: arc.text,
                         pinyin: arc.pinyin,
                         en: arc.kind.is_english(),
+                        completed: arc.completed,
+                        fuzzy: arc.fuzzy,
                     });
                     bucket.insert(
                         state,
@@ -228,15 +237,11 @@ pub fn decode_topn(
     finals.sort_by(|a, b| b.score.total_cmp(&a.score));
     let mut results: Vec<DecodeResult> = Vec::with_capacity(topn);
     for hyp in finals {
-        let (text, preedit) = materialize(&nodes, hyp.node);
-        if results.iter().any(|r| r.text == text) {
+        let r = materialize(&nodes, hyp.node, hyp.score);
+        if results.iter().any(|prev| prev.text == r.text) {
             continue;
         }
-        results.push(DecodeResult {
-            text,
-            preedit,
-            score: hyp.score,
-        });
+        results.push(r);
         if results.len() >= topn {
             break;
         }
@@ -244,7 +249,7 @@ pub fn decode_topn(
     results
 }
 
-fn materialize(nodes: &[Node], mut idx: i32) -> (String, String) {
+fn materialize(nodes: &[Node], mut idx: i32, score: f64) -> DecodeResult {
     let mut chain: Vec<&Node> = Vec::new();
     while idx >= 0 {
         let node = &nodes[idx as usize];
@@ -255,18 +260,28 @@ fn materialize(nodes: &[Node], mut idx: i32) -> (String, String) {
     let mut text = String::new();
     let mut preedit = String::new();
     let mut prev_en = false;
+    let mut completed = false;
+    let mut fuzzy = false;
     for node in chain {
         if prev_en && node.en {
             text.push(' '); // English run: "timewindow" -> "time window"
         }
         text.push_str(node.text);
         prev_en = node.en;
+        completed |= node.completed;
+        fuzzy |= node.fuzzy;
         if !preedit.is_empty() {
             preedit.push(' ');
         }
         preedit.push_str(node.pinyin);
     }
-    (text, preedit)
+    DecodeResult {
+        text,
+        preedit,
+        score,
+        completed,
+        fuzzy,
+    }
 }
 
 #[cfg(test)]

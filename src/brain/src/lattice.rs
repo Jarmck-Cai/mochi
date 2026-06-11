@@ -497,8 +497,8 @@ impl SyllableSet {
     }
 
     /// Longest-match-first segmentation with backtracking; None when the
-    /// stream is not a pure pinyin syllable sequence.
-    #[allow(dead_code)] // exercised in tests; production preedit comes from arcs
+    /// stream is not a pure pinyin syllable sequence. Used to recognize
+    /// abandoned raw-pinyin commits (personal.rs) besides tests.
     pub fn segment<'a>(&self, keys: &'a str) -> Option<Vec<&'a str>> {
         fn go<'a>(set: &SyllableSet, keys: &'a str, pos: usize, acc: &mut Vec<&'a str>) -> bool {
             if pos == keys.len() {

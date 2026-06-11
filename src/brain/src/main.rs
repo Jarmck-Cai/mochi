@@ -186,10 +186,11 @@ fn main() {
             let us = t0.elapsed().as_micros();
             for (i, c) in cands.iter().enumerate() {
                 println!(
-                    "{}\t#{}\t{}\t{}\t{:.4}\t{}us",
+                    "{}\t#{}\t{}\t{}\t{}\t{:.4}\t{}us",
                     keys,
                     i + 1,
                     c.text,
+                    c.comment,
                     c.preedit,
                     c.quality,
                     us
