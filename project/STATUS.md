@@ -43,7 +43,7 @@
 - [x] **第二轮反馈闭环（2026-06-11 下午）**：① 英文连写——连续英文弧切换成本只收一次（en_continue -0.5）+ 相邻英文词自动空格，`timewindow`→"time window"、`deeplearning`→"deep learning"；② **纠正信号检测**——同输入改选 = 纠正：新选择 3 倍加权、被否定事件按记录的精确增量回撤（RecentCommit 存实际计入的 token 句子，免疫短语促升导致的分词漂移），journal 仍存原始事实、回放重新解释（确定性测试过）。"桔子案例"翻回"句子" ✓。42 单测全过
 - [x] **M3 打磨包第一期（2026-06-11 第三轮反馈闭环）**：① **尾部补全弧**（音节/词 key/英文词/个人词四路，惩罚 -2.0）——`congrat`→congratulations、`separ`→separate、`shangxiaw`→上下文、`eeg` 次选 EEGLab（个人补全）；② **模糊音**（z/zh c/ch s/sh in/ing en/eng an/ang，单音节变体，惩罚 -1.5）——`pinying`→拼音；③ **英文底座**：wordfreq top-50k + zipf 频率 λ=0.3 混入 unigram（英文词第一次有彼此排序）。44 单测全过。详见 devlog 2026-06-11-打磨包第一期
 - [x] **第四轮反馈闭环（2026-06-11 晚）**：① **补全可视化**——补全候选 comment 标 `+«补入字母»`（如 自动补全后 `+ou`）、模糊候选标 `~`，Weasel 浅色渲染，解决"不知道打到哪了"的认知错位（真 ghost 内联仍归 M5）；② **放弃输入防污染**——≥6 字母且完整切为 ≥3 拼音音节的 ASCII 上屏视为放弃的原始输入，不学进英文词库（"zidongbuquanhou"曾被学成英文词并参与补全，回放即自愈）。46 单测全过
-- [x] **Ghost 显示推进（2026-06-11 深夜）**：① 阶段 0 完整落地——comment 标记升级到**文字空间**（`自动补全和 ▸和`、`congratulations ▸ulations`，按读音覆盖度逐字判定）+ **preedit 边界标记**（`shang xia w‥en`，输入区/preedit 行显示真实输入边界）；② **阶段 1（候选内灰字）可行性确认**——weasel IPC 的候选本来就是带属性区间的 `Text` 结构（仅没人用），渲染器有 preedit 三段绘制先例，改造仅 3 文件 ~60 行（清单见 docs/research/2026-06-11-ghost-display-design.md）；boost 复用 librime deps 源码树，weasel 0.17.4 构建链验证进行中。加载时间挂起项关闭（正常功耗 2150ms < 3s）
+- [x] **Ghost 显示推进（2026-06-11 深夜）**：① 阶段 0 完整落地——comment 标记升级到**文字空间**（`自动补全和 ▸和`、`congratulations ▸ulations`，按读音覆盖度逐字判定）+ **preedit 边界标记**（`shang xia w‥en`，输入区/preedit 行显示真实输入边界）；② **阶段 1 候选内灰字已部署**——fork weasel 0.17.4（4 文件 102 行：GHOST 属性 + ▸ comment 解析 + DWrite 区间灰绘），自编 WeaselServer/weasel.dll/weaselx64.dll 已替换安装（原版 .stock 备份），补丁固化 experiments/004/weasel-ghost-0.17.4.patch。**待用户视觉验收灰色渲染**。加载时间挂起项关闭（正常功耗 2150ms < 3s）。供应链升级：现在同时分发 rime.dll + weasel 三件套
 
 ## 下一步（按优先级）
 

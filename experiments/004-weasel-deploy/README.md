@@ -41,9 +41,22 @@ powershell -ExecutionPolicy Bypass -File deploy-weasel.ps1
 
 ## 文件
 
-- `mochi.schema.yaml`——真实打字版 schema（v0.2：+标点/recognizer/Shift 切换）
+- `mochi.schema.yaml`——真实打字版 schema（v0.3：+标点/Shift 切换/翻页）
 - `default.custom.yaml`——Weasel 用户目录补丁（mochi + luna 并存）
-- `deploy-weasel.ps1`——部署/回滚脚本（停服→换 dll→部署 schema→重启）
+- `deploy-weasel.ps1`——rime.dll 部署/回滚脚本（停服→换 dll→部署 schema→重启）
+- `weasel-ghost-0.17.4.patch`——**weasel fork 补丁**（候选内灰色 ghost，
+  阶段 1）：GHOST 文本属性 + RimeWithWeasel 解析 brain 的 `▸` comment 约定
+  + WeaselPanel 按区间 SetDrawingEffect 灰绘 + .rc 的 afxres→winres
+- `weasel-build.cmd`——weasel fork 构建脚本。重建步骤：
+  ```
+  git clone --depth 1 --branch 0.17.4 https://github.com/rime/weasel.git
+  git apply weasel-ghost-0.17.4.patch
+  # rime 头/库就位：librime dist 的 include→weasel\librime\include，
+  #   rime.lib→weasel\lib64 与 weasel\lib；boost 用 librime deps 源码树
+  # 前置组件：VS BuildTools + ATL（vs_installer --add ...VC.ATL）
+  weasel-build.cmd   # 产出 output\{WeaselServer.exe,weasel.dll,weaselx64.dll}
+  # 提权替换 Program Files\Rime\weasel-0.17.4\ 下同名文件（自动备份 .stock）
+  ```
 
 ## 结论
 

@@ -72,5 +72,10 @@ build.bat boost 步骤补编）；VS2022 BuildTools 既有。构建验证进行�
 ## 现状记录
 
 - 阶段 0（文字空间 ▸ 标记 + preedit ‥ 边界）已上线
-- 阶段 1 可行性确认（上节），等构建链验证通过即可实施；阶段 2（TSF 内联）
-  仍归 M5 与续写预测同批
+- **阶段 1 已实施部署（2026-06-11 晚）**：weasel 0.17.4 fork，4 文件
+  102 行（GHOST 属性 + ▸ comment 解析 + DWrite SetDrawingEffect 区间灰绘
+  + rc 头修正）。构建坑沉淀：BuildTools 需补 ATL 组件；rime 头/库放
+  weasel\librime\include 与 lib64+lib；.rc 的 afxres.h→winres.h 免装 MFC；
+  Win32 变体的 Server/Deployer 链接失败可忽略（安装版不含）。补丁与构建
+  脚本固化在 experiments/004（weasel-ghost-0.17.4.patch）
+- 阶段 2（TSF 内联）归 M5 与续写预测同批
