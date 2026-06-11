@@ -1,11 +1,11 @@
 # 项目状态
 
 > 每个 session 收工时更新本文件。历史细节见 devlog/。
-> 最后更新：2026-06-10（第五次更新：M2-3 个人记忆库上线，锚点用例通过）
+> 最后更新：2026-06-11（第六次更新：M2-4 代码侧完成，待 Weasel 安装提权）
 
 ## 当前阶段
 
-**M2 进行中（1/2/3 ✅，剩 M2-4 部署进 Weasel）**（基本盘：RIME translator + 词图 + 记忆库 + 中英混打）
+**M2 进行中（1/2/3 ✅，M2-4 代码侧 ✅，部署待 UAC）**（基本盘：RIME translator + 词图 + 记忆库 + 中英混打）
 
 ## 已完成
 
@@ -32,16 +32,19 @@
 
 - [x] **M2-3 个人记忆库 ✅（2026-06-10 晚）**：锚点通过——rime_console 选一次"随机梯度"，下一次裸打 `suijitidu` 首选即出；重启记忆仍在（commits.jsonl 回放，按天衰减 0.98）。场景分桶（pipe 实测）+ 贪心分词/拼音对齐 + 词典外短语促升建弧 + 英文大小写习惯 + 文档导入冷启动（export_personal.py → user_data/personal.tsv，6361 行）。持久化用**追加 jsonl 而非 rusqlite**（用户可查看/删行，理由见报告）。Python full 配置 top-1 一致 12/12；延迟无回归（个人层加载后 len20 中位 199µs）；37 单测全过。插件 commit_notifier 已挂（e2e 遗留 3 清掉）。报告：docs/research/2026-06-10-m2-personal-memory.md
 
+- [x] **M2-4 代码侧 ✅（2026-06-11）**：① 不完整音节尾部修复——纯 fallback 后缀标 FallbackTail（先验 -1.5），`woyaoc`→"我要c"不再"我压oc"（根因：英文垃圾短词弧便宜），39 单测过；② 真实 scene 信号——插件 SceneProbe 前台进程名（HWND 缓存）接入 query/commit，brain 日志带 app=；③ 部署套件 experiments/004-weasel-deploy/（schema v0.2 +标点+Shift 切换、与明月并存 F4 兜底、deploy-weasel.ps1 自动备份/一键回滚、README 含 M2 验收协议）
+
 ## 进行中
 
-（无）
+- **M2-4 部署**：卡在 Weasel 安装的 UAC 提权（系统级安装必须用户点确认）。继续步骤：①管理员装 `winget install Rime.Weasel` ②管理员跑 `experiments\004-weasel-deploy\deploy-weasel.ps1` ③起 `src\brain\target\release\mochi-brain.exe` ④输入法切小狼毫，F4 选 Mochi
 
 ## 下一步（按优先级）
 
-1. **M2-4 部署进 Weasel 真实打字**，对比微软拼音（M2 验收：混打切换次数 -80%、整句准确率 ≥ 微软拼音）。包含：真实 scene 信号接入（分桶逻辑已就绪，等 app 身份）、不完整音节 composition 展示、兜底 translator/schema 设计
-2. commit 学习信号分级（选字纠正 vs 默认上屏权重应不同；协议加可选字段，M2-4 真实打字观察后定）
-3. 管道抢注防护（FIRST_PIPE_INSTANCE + ACL，产品化前）
-4. UIA 补测（M5 前完成即可）
+1. **M2-4 真实打字验收**：记事本/微信冒烟（看 brain 日志 app= 验证场景分桶），然后按 experiments/004 README 协议对比微软拼音（混打切换 -80%、整句准确率 ≥），建议 ≥3 天真实使用
+2. brain 自动拉起（插件 EnsureConnected 失败时 CreateProcess，或注册开机启动）——部署体验前置项
+3. commit 学习信号分级（选字纠正 vs 默认上屏权重应不同；协议加可选字段，真实打字观察后定）
+4. 管道抢注防护（FIRST_PIPE_INSTANCE + ACL，产品化前）
+5. UIA 补测（M5 前完成即可）
 
 ## 阻塞 / 待用户决策
 
