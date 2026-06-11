@@ -157,6 +157,19 @@ mod tests {
         assert_eq!(e.query("suijitidu", Some("weixin.exe"))[0].text, "随机梯度");
     }
 
+    /// The 桔子 case: committing a wrong word, then re-choosing for the
+    /// same input — the correction must win immediately (boost + retract),
+    /// and a later deliberate re-quote flips it back just as fast.
+    #[test]
+    fn correction_outweighs_earlier_commit() {
+        let e = Engine::mini();
+        e.commit("随即梯度", Some("suijitidu"), None);
+        e.commit("随机梯度", Some("suijitidu"), None);
+        assert_eq!(e.query("suijitidu", None)[0].text, "随机梯度");
+        e.commit("随即梯度", Some("suijitidu"), None);
+        assert_eq!(e.query("suijitidu", None)[0].text, "随即梯度");
+    }
+
     #[test]
     fn english_personal_term_with_casing_wins() {
         let e = Engine::mini();

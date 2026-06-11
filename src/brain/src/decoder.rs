@@ -22,6 +22,10 @@ pub struct ArcPriors {
     pub py_personal: f64,
     pub en_word: f64,
     pub en_personal: f64,
+    /// An English word right after another English word: the mode switch
+    /// was already paid, continuing the run is cheap ("timewindow" must
+    /// not pay -3 twice and lose to 提么+window).
+    pub en_continue: f64,
     pub fallback: f64,
     pub fallback_tail: f64,
 }
@@ -34,6 +38,7 @@ impl Default for ArcPriors {
             py_personal: 0.0,
             en_word: -3.0,
             en_personal: -1.0, // user's own terms pay a smaller switch cost
+            en_continue: -0.5,
             fallback: -12.0,
             // unfinished tail: keeping raw letters is the *expected* display
             // while a syllable is half-typed, so the cost is mild
@@ -94,7 +99,7 @@ impl<'a> Scorer<'a> {
     }
 
     #[inline]
-    fn arc_score(&self, arc: &Arc, h2: u32, h1: u32) -> f64 {
+    fn arc_score(&self, arc: &Arc, h2: u32, h1: u32, prev_en: bool) -> f64 {
         let logp_g = self.lm.logp(arc.lm_token, h2, h1);
         let mut score = if self.mu_personal > 0.0 {
             // linear interpolation in probability space (decoder.py)
@@ -109,7 +114,11 @@ impl<'a> Scorer<'a> {
             // μ_g = 1, μ_p = 0: log10(1.0 · 10^logp) == logp, skip the pow
             logp_g
         };
-        score += self.priors.of(arc.kind);
+        score += if prev_en && arc.kind.is_english() {
+            self.priors.en_continue
+        } else {
+            self.priors.of(arc.kind)
+        };
         if self.lambda_lexicon > 0.0 {
             score += self.lambda_lexicon * self.personal.lexicon_bonus(arc.lm_token);
         }
@@ -120,13 +129,15 @@ impl<'a> Scorer<'a> {
 #[derive(Clone, Copy)]
 struct Hyp {
     score: f64,
-    node: i32, // index into the backpointer arena, -1 = path start
+    node: i32,     // index into the backpointer arena, -1 = path start
+    last_en: bool, // last arc was an English word (run continuation)
 }
 
 struct Node<'a> {
     parent: i32,
     text: &'a str,
     pinyin: &'a str,
+    en: bool, // English-word node: spaces go between adjacent ones
 }
 
 pub struct DecodeResult {
@@ -154,7 +165,14 @@ pub fn decode_topn(
     let arcs = builder.build(keys, personal_arcs);
     let mut nodes: Vec<Node> = Vec::with_capacity(64);
     let mut beams: Vec<FxHashMap<(u32, u32), Hyp>> = (0..=n).map(|_| FxHashMap::default()).collect();
-    beams[0].insert((bos, bos), Hyp { score: 0.0, node: -1 });
+    beams[0].insert(
+        (bos, bos),
+        Hyp {
+            score: 0.0,
+            node: -1,
+            last_en: false,
+        },
+    );
     let mut frontier: Vec<((u32, u32), Hyp)> = Vec::new();
     for pos in 0..n {
         if beams[pos].is_empty() {
@@ -164,10 +182,11 @@ pub fn decode_topn(
         frontier.extend(beams[pos].iter().map(|(&s, &h)| (s, h)));
         frontier.sort_by(|a, b| b.1.score.total_cmp(&a.1.score));
         frontier.truncate(beam_width);
-        // the state key IS the trigram history (h2, h1)
+        // the state key IS the trigram history (h2, h1); last_en needs no
+        // extra state split — a given lm_token always has one arc kind
         for &((h2, h1), hyp) in frontier.iter() {
             for arc in &arcs[pos] {
-                let s = hyp.score + scorer.arc_score(arc, h2, h1);
+                let s = hyp.score + scorer.arc_score(arc, h2, h1, hyp.last_en);
                 let state = (h1, arc.lm_token);
                 let bucket = &mut beams[arc.end];
                 let insert = match bucket.get(&state) {
@@ -179,12 +198,14 @@ pub fn decode_topn(
                         parent: hyp.node,
                         text: arc.text,
                         pinyin: arc.pinyin,
+                        en: arc.kind.is_english(),
                     });
                     bucket.insert(
                         state,
                         Hyp {
                             score: s,
                             node: (nodes.len() - 1) as i32,
+                            last_en: arc.kind.is_english(),
                         },
                     );
                 }
@@ -221,8 +242,13 @@ fn materialize(nodes: &[Node], mut idx: i32) -> (String, String) {
     chain.reverse();
     let mut text = String::new();
     let mut preedit = String::new();
+    let mut prev_en = false;
     for node in chain {
+        if prev_en && node.en {
+            text.push(' '); // English run: "timewindow" -> "time window"
+        }
         text.push_str(node.text);
+        prev_en = node.en;
         if !preedit.is_empty() {
             preedit.push(' ');
         }
@@ -269,6 +295,18 @@ mod tests {
         assert_eq!(r[0].text, "我要勇敢");
         // standalone "test" has no pinyin reading in the mini dict -> English arc wins
         let r = top("test", 3);
+        assert_eq!(r[0].text, "test");
+    }
+
+    #[test]
+    fn english_run_gets_spaces_and_single_switch_cost() {
+        // two consecutive English words: spaces in the surface, the second
+        // word pays the cheap continuation prior, not the -3 switch cost
+        let r = top("thetest", 3);
+        assert_eq!(r[0].text, "the test");
+        assert_eq!(r[0].preedit, "the test");
+        // single English word: behavior unchanged, no stray spaces
+        let r = top("test", 1);
         assert_eq!(r[0].text, "test");
     }
 

@@ -44,6 +44,14 @@ const MIN_ZH_COUNT: f64 = 3.0;
 /// Decayed occurrences before a whole committed phrase (dict-OOV, 2-6 hanzi)
 /// becomes a personal word with its own lattice arc.
 const MIN_PHRASE_COUNT: f64 = 2.0;
+/// Re-selecting a different word for the SAME raw input is a correction —
+/// the strongest signal the memory gets. It learns at this multiple, and
+/// the contradicted earlier commit is retracted (negative learning).
+/// Real case: quoting a wrong word (桔子) repeatedly flipped the ranking;
+/// with corrections weighted, the last deliberate choice wins.
+const CORRECTION_BOOST: f64 = 3.0;
+/// How many recent commits are scanned for a same-input contradiction.
+const RECENT_WINDOW: usize = 16;
 
 #[inline]
 fn bi_key(h1: u32, w: u32) -> u64 {
@@ -186,7 +194,31 @@ pub struct PersonalStore {
     en_surface: FxHashMap<u32, Box<str>>,
     today: u32,
     log_path: Option<PathBuf>,
+    /// Recent commits, scanned for same-input corrections (newest last).
+    recent: std::collections::VecDeque<RecentCommit>,
     pub n_events: u64,
+}
+
+struct RecentCommit {
+    input: Box<str>,
+    text: Box<str>,
+    /// What the event actually added (taken on retraction). Storing the
+    /// applied deltas — not the text — makes retraction exact even when
+    /// tokenization has drifted since (e.g. a phrase got promoted).
+    record: Option<LearnRecord>,
+}
+
+/// The ranking-relevant mass one learn() call added: LM sentences (token
+/// ids as counted), lexicon increments, the phrase vote. Structural
+/// side effects (arc promotion, casing votes, back-fill) are one-time and
+/// stay — only the mutable mass is retractable.
+struct LearnRecord {
+    weight: f64,
+    scene: Option<String>,
+    sentences: Vec<Vec<u32>>,
+    lex_zh: Vec<(u32, f64)>,
+    lex_en: Vec<(u32, f64)>,
+    phrase: Option<(u32, f64)>,
 }
 
 /// Scene-resolved read view; what the decoder scores against.
@@ -257,6 +289,7 @@ impl PersonalStore {
             en_surface: FxHashMap::default(),
             today: today(),
             log_path: None,
+            recent: std::collections::VecDeque::new(),
             n_events: 0,
         }
     }
@@ -284,7 +317,9 @@ impl PersonalStore {
                     Ok(ev) => {
                         let age = store.today.saturating_sub(ev.day);
                         let weight = DECAY_PER_DAY.powi(age as i32);
-                        store.learn(arts, &ev.text, ev.input.as_deref(), ev.app.as_deref(), weight);
+                        // same path as live commits: the journal stores raw
+                        // facts, correction detection re-runs on replay
+                        store.ingest(arts, &ev.text, ev.input.as_deref(), ev.app.as_deref(), weight);
                         n += 1;
                     }
                     Err(e) => eprintln!("[brain] commits.jsonl: skipping bad line: {}", e),
@@ -296,9 +331,10 @@ impl PersonalStore {
         store
     }
 
-    /// Live commit: learn at weight 1.0 and append to the journal.
+    /// Live commit: learn (with correction detection) and journal the raw
+    /// event — interpretation happens at learn time, the log stays facts.
     pub fn commit(&mut self, arts: &Artifacts, text: &str, input: Option<&str>, app: Option<&str>) {
-        self.learn(arts, text, input, app, 1.0);
+        self.ingest(arts, text, input, app, 1.0);
         if let Some(path) = self.log_path.clone() {
             let ev = CommitEvent {
                 day: self.today,
@@ -343,14 +379,82 @@ impl PersonalStore {
 
     // ------------------------------------------------------------- learning
 
-    /// One learning pass over a committed text. The heart of "学习必须即时
-    /// 生效": everything updated here is visible to the very next query.
-    fn learn(&mut self, arts: &Artifacts, text: &str, input: Option<&str>, app: Option<&str>, weight: f64) {
-        let units = parse_units(text);
-        if units.is_empty() {
-            return;
+    /// One commit event: correction detection, then learning. A recent
+    /// commit with the SAME raw input but a different text means the user
+    /// re-chose — the new pick learns boosted, the contradicted event is
+    /// retracted at exactly the weight it was learned with.
+    fn ingest(&mut self, arts: &Artifacts, text: &str, input: Option<&str>, app: Option<&str>, base_weight: f64) {
+        let mut weight = base_weight;
+        if let Some(keys) = input {
+            let contradicted = self
+                .recent
+                .iter()
+                .rposition(|r| r.record.is_some() && &*r.input == keys && &*r.text != text);
+            if let Some(idx) = contradicted {
+                if let Some(record) = self.recent[idx].record.take() {
+                    self.retract(&record);
+                }
+                weight = base_weight * CORRECTION_BOOST;
+            }
         }
         self.n_events += 1;
+        let record = self.learn(arts, text, input, app, weight);
+        if let Some(keys) = input {
+            self.recent.push_back(RecentCommit {
+                input: keys.into(),
+                text: text.into(),
+                record,
+            });
+            if self.recent.len() > RECENT_WINDOW {
+                self.recent.pop_front();
+            }
+        }
+    }
+
+    /// Inverse of one learn() call, applied to the exact deltas it recorded.
+    fn retract(&mut self, rec: &LearnRecord) {
+        for sent in &rec.sentences {
+            self.global.add_sentence(sent, self.bos, -rec.weight);
+            if let Some(scene) = &rec.scene {
+                if let Some(lm) = self.scenes.get_mut(scene.as_str()) {
+                    lm.add_sentence(sent, self.bos, -rec.weight);
+                }
+            }
+        }
+        for &(tok, d) in &rec.lex_zh {
+            *self.lex_zh.entry(tok).or_insert(0.0) -= d;
+        }
+        for &(tok, d) in &rec.lex_en {
+            *self.lex_en.entry(tok).or_insert(0.0) -= d;
+        }
+        if let Some((tok, d)) = rec.phrase {
+            *self.phrase_counts.entry(tok).or_insert(0.0) -= d;
+        }
+    }
+
+    /// One learning pass over a committed text; returns the retractable
+    /// deltas. The heart of "学习必须即时生效": everything updated here is
+    /// visible to the very next query.
+    fn learn(
+        &mut self,
+        arts: &Artifacts,
+        text: &str,
+        input: Option<&str>,
+        app: Option<&str>,
+        weight: f64,
+    ) -> Option<LearnRecord> {
+        let units = parse_units(text);
+        if units.is_empty() {
+            return None;
+        }
+        let mut rec = LearnRecord {
+            weight,
+            scene: None,
+            sentences: Vec::new(),
+            lex_zh: Vec::new(),
+            lex_en: Vec::new(),
+            phrase: None,
+        };
         // Pinyin per hanzi unit, recovered from the raw keys when possible.
         let syllables = input.and_then(|keys| align(&units, keys, arts));
 
@@ -373,6 +477,7 @@ impl PersonalStore {
                         let tok = self.token(arts, &lower);
                         current.push(tok);
                         *self.lex_en.entry(tok).or_insert(0.0) += weight;
+                        rec.lex_en.push((tok, weight));
                         *self
                             .case_counts
                             .entry(tok)
@@ -413,6 +518,7 @@ impl PersonalStore {
                         current.push(tok);
                         if taken >= 2 {
                             *self.lex_zh.entry(tok).or_insert(0.0) += weight;
+                            rec.lex_zh.push((tok, weight));
                             let key = syllables.as_ref().map(|syls| {
                                 syls[start + j..start + j + taken].join(" ")
                             });
@@ -438,6 +544,7 @@ impl PersonalStore {
                     .add_sentence(sent, self.bos, weight);
             }
         }
+        rec.scene = scene_key.clone();
 
         // --- personal zh word arcs for dict-OOV words past the threshold
         for (tok, word, key) in zh_spans {
@@ -456,6 +563,7 @@ impl PersonalStore {
                     *e += weight;
                     *e
                 };
+                rec.phrase = Some((tok, weight));
                 if count >= MIN_PHRASE_COUNT {
                     let key = syllables.as_ref().map(|syls| syls.join(" "));
                     let promoted = self.maybe_add_zh_arc(
@@ -476,6 +584,9 @@ impl PersonalStore {
                 }
             }
         }
+
+        rec.sentences = sentences;
+        Some(rec)
     }
 
     /// Add a personal lattice arc for a Chinese word if it is dict-OOV, past
@@ -847,6 +958,41 @@ mod tests {
             let tok = arts.interner.get("测试").unwrap();
             assert!(store.global.knows(tok));
             assert!(store.scenes.contains_key("weixin.exe"));
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn correction_replay_is_deterministic() {
+        let arts = mini_artifacts();
+        let dir = std::env::temp_dir().join(format!(
+            "mochi-test-corr-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let (wrong, right) = (
+            arts.interner.get("随即").unwrap(),
+            arts.interner.get("随机").unwrap(),
+        );
+        let p_before;
+        {
+            let mut store = PersonalStore::open(&arts, &dir);
+            store.commit(&arts, "随即梯度", Some("suijitidu"), None);
+            store.commit(&arts, "随机梯度", Some("suijitidu"), None);
+            let v = store.view(None);
+            p_before = (v.p(right, arts.bos, arts.bos), v.p(wrong, arts.bos, arts.bos));
+            assert!(p_before.0 > p_before.1, "correction must outweigh");
+        }
+        {
+            // journal stores raw events; replay re-runs correction detection
+            let store = PersonalStore::open(&arts, &dir);
+            let v = store.view(None);
+            let p_after = (v.p(right, arts.bos, arts.bos), v.p(wrong, arts.bos, arts.bos));
+            assert!((p_after.0 - p_before.0).abs() < 1e-9);
+            assert!((p_after.1 - p_before.1).abs() < 1e-9);
         }
         let _ = std::fs::remove_dir_all(&dir);
     }

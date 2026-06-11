@@ -22,6 +22,15 @@ pub enum ArcKind {
     FallbackTail, // raw letter in the unfinished tail (cheap: typing goes on)
 }
 
+impl ArcKind {
+    /// English-word arcs form runs: "timewindow" -> "time window" (spaces
+    /// between them, mode-switch cost paid once).
+    #[inline]
+    pub fn is_english(self) -> bool {
+        matches!(self, ArcKind::EnWord | ArcKind::EnPersonal)
+    }
+}
+
 /// One word stored under a matcher key.
 pub struct Entry {
     /// Surface form emitted when the arc is taken.
