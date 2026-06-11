@@ -13,12 +13,13 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArcKind {
-    PyWord,     // multi-char dictionary word via pinyin
-    PyChar,     // single hanzi via pinyin
-    PyPersonal, // personal-lexicon Chinese word (OOV in the static dict)
-    EnWord,     // general-vocabulary English word
-    EnPersonal, // personal-lexicon English word (user's own terms/casing)
-    Fallback,   // single raw letter, last resort
+    PyWord,       // multi-char dictionary word via pinyin
+    PyChar,       // single hanzi via pinyin
+    PyPersonal,   // personal-lexicon Chinese word (OOV in the static dict)
+    EnWord,       // general-vocabulary English word
+    EnPersonal,   // personal-lexicon English word (user's own terms/casing)
+    Fallback,     // single raw letter mid-stream, last resort
+    FallbackTail, // raw letter in the unfinished tail (cheap: typing goes on)
 }
 
 /// One word stored under a matcher key.
@@ -224,6 +225,18 @@ impl LatticeBuilder {
                 });
             }
         }
+        // The maximal all-fallback suffix is an *unfinished* pinyin tail (the
+        // user is still typing): those letters stay raw cheaply instead of
+        // being force-read as junk short English words or odd char splits
+        // ("woyaoc" must show 我要c, not 我压oc).
+        for pos in (0..n).rev() {
+            if !arcs[pos].iter().all(|a| a.kind == ArcKind::Fallback) {
+                break;
+            }
+            for arc in arcs[pos].iter_mut() {
+                arc.kind = ArcKind::FallbackTail;
+            }
+        }
         arcs
     }
 }
@@ -371,10 +384,23 @@ mod tests {
         let arts = mini_artifacts();
         let arcs = arts.builder.build("nivx", None); // v/x start no entry in mini dict
         assert_eq!(arcs[2].len(), 1);
-        assert_eq!(arcs[2][0].kind, ArcKind::Fallback);
+        // trailing all-fallback run counts as the unfinished tail
+        assert_eq!(arcs[2][0].kind, ArcKind::FallbackTail);
         assert_eq!(arcs[2][0].text, "v");
         assert_eq!(arcs[2][0].end, 3);
         // every position has at least one arc (lattice always connected)
         assert!(arcs.iter().all(|a| !a.is_empty()));
+    }
+
+    #[test]
+    fn mid_stream_fallback_stays_expensive_tail_is_cheap() {
+        let arts = mini_artifacts();
+        // "v" mid-stream (before valid pinyin) is a real gap, not a tail
+        let arcs = arts.builder.build("vni", None);
+        assert_eq!(arcs[0][0].kind, ArcKind::Fallback);
+        // half-typed syllable at the end is a tail
+        let arcs = arts.builder.build("nihaoc", None);
+        let last = arcs[5].iter().find(|a| a.text == "c").unwrap();
+        assert_eq!(last.kind, ArcKind::FallbackTail);
     }
 }

@@ -16,6 +16,7 @@
 #include <rime/translator.h>
 
 #include "brain_client.h"
+#include "scene_probe.h"
 
 namespace mochi {
 
@@ -30,8 +31,12 @@ class MochiTranslator : public Translator {
 
  private:
   void OnCommit(Context* ctx);
+  // ipc-v0 scene object for the current foreground app, e.g.
+  // {"app":"weixin.exe"} (empty object when unknown).
+  std::string SceneJson();
 
   BrainClient brain_;
+  SceneProbe scene_;
   connection commit_connection_;
   int delay_ms_ = 0;          // simulated extra delay (ms), PoC-compatible
   long long call_count_ = 0;  // Query invocations on this instance

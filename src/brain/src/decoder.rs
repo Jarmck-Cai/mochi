@@ -23,6 +23,7 @@ pub struct ArcPriors {
     pub en_word: f64,
     pub en_personal: f64,
     pub fallback: f64,
+    pub fallback_tail: f64,
 }
 
 impl Default for ArcPriors {
@@ -34,6 +35,9 @@ impl Default for ArcPriors {
             en_word: -3.0,
             en_personal: -1.0, // user's own terms pay a smaller switch cost
             fallback: -12.0,
+            // unfinished tail: keeping raw letters is the *expected* display
+            // while a syllable is half-typed, so the cost is mild
+            fallback_tail: -1.5,
         }
     }
 }
@@ -48,6 +52,7 @@ impl ArcPriors {
             ArcKind::EnWord => self.en_word,
             ArcKind::EnPersonal => self.en_personal,
             ArcKind::Fallback => self.fallback,
+            ArcKind::FallbackTail => self.fallback_tail,
         }
     }
 }
@@ -265,6 +270,14 @@ mod tests {
         // standalone "test" has no pinyin reading in the mini dict -> English arc wins
         let r = top("test", 3);
         assert_eq!(r[0].text, "test");
+    }
+
+    #[test]
+    fn unfinished_tail_stays_raw() {
+        // half-typed syllable: best candidate keeps the tail as letters
+        let r = top("woyaoc", 1);
+        assert_eq!(r[0].text, "我要c");
+        assert_eq!(r[0].preedit, "wo yao c");
     }
 
     #[test]

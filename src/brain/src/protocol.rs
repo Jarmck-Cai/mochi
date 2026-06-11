@@ -110,8 +110,9 @@ pub fn handle_message(engine: &Engine, raw: &[u8]) -> Vec<u8> {
                 elapsed_us,
             };
             eprintln!(
-                "[brain] query input='{}' cands={} top='{}' elapsed={}us",
+                "[brain] query input='{}' app='{}' cands={} top='{}' elapsed={}us",
                 input,
+                app.unwrap_or(""),
                 response.candidates.len(),
                 response.candidates.first().map_or("", |c| c.text.as_str()),
                 elapsed_us
@@ -132,9 +133,10 @@ pub fn handle_message(engine: &Engine, raw: &[u8]) -> Vec<u8> {
             engine.commit(&text, input.as_deref(), app);
             let elapsed_us = started.elapsed().as_micros() as u64;
             eprintln!(
-                "[brain] commit text='{}' input='{}' learned in {}us ({})",
+                "[brain] commit text='{}' input='{}' app='{}' learned in {}us ({})",
                 text,
                 input.as_deref().unwrap_or(""),
+                app.unwrap_or(""),
                 elapsed_us,
                 engine.personal_stats(),
             );

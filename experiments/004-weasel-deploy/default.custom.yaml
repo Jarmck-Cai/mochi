@@ -1,0 +1,7 @@
+# Weasel 用户目录补丁：把 mochi 挂进方案列表（保留明月拼音作对照/兜底，
+# F4 可随时切换——brain 出问题时切回 luna 不影响打字）。
+patch:
+  schema_list:
+    - schema: mochi
+    - schema: luna_pinyin_simp
+  menu/page_size: 5

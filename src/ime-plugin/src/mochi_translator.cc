@@ -35,6 +35,13 @@ MochiTranslator::~MochiTranslator() {
   commit_connection_.disconnect();
 }
 
+std::string MochiTranslator::SceneJson() {
+  const std::string& app = scene_.CurrentApp();
+  if (app.empty())
+    return "{}";
+  return "{\"app\":\"" + json::Escape(app) + "\"}";
+}
+
 void MochiTranslator::OnCommit(Context* ctx) {
   const std::string text = ctx->GetCommitText();
   if (text.empty())
@@ -44,8 +51,8 @@ void MochiTranslator::OnCommit(Context* ctx) {
   // and degradation rules as query; a lost commit is acceptable).
   std::string request = "{\"v\":1,\"method\":\"commit\",\"text\":\"" +
                         json::Escape(text) + "\",\"input\":\"" +
-                        json::Escape(ctx->input()) +
-                        "\",\"scene\":{}}";
+                        json::Escape(ctx->input()) + "\",\"scene\":" +
+                        SceneJson() + "}";
   std::string response;
   const bool ok = brain_.Roundtrip(request, &response);
   LOG(INFO) << "[mochi] commit text='" << text << "' input='" << ctx->input()
@@ -68,13 +75,13 @@ an<Translation> MochiTranslator::Query(const string& input,
     std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms_));
   }
 
-  // Build the ipc-v0 query request. scene/session are placeholders until
-  // the plugin runs inside Weasel and has real app/session identity.
+  // Build the ipc-v0 query request; scene carries the foreground app
+  // (ADR-004 Tier 0), which selects the brain's per-scene memory bucket.
   std::string request = "{\"v\":1,\"method\":\"query\",\"input\":\"" +
                         json::Escape(input) + "\",\"seg\":[" +
                         std::to_string(segment.start) + "," +
-                        std::to_string(segment.end) +
-                        "],\"scene\":{},\"session\":\"rime-console\"}";
+                        std::to_string(segment.end) + "],\"scene\":" +
+                        SceneJson() + ",\"session\":\"rime\"}";
 
   std::string raw_response;
   an<FifoTranslation> translation;
