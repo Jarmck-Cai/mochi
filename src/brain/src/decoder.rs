@@ -151,6 +151,7 @@ struct Node<'a> {
     pinyin: &'a str,
     en: bool,        // English-word node: spaces go between adjacent ones
     completed: bool, // typing-ahead arc
+    typed_len: u16,  // for completed arcs: key bytes the user actually typed
     fuzzy: bool,     // fuzzy-pinyin arc
 }
 
@@ -159,10 +160,35 @@ pub struct DecodeResult {
     pub preedit: String,
     pub score: f64,
     /// Path ends in a typing-ahead completion: the candidate contains
-    /// letters the user did NOT type — the UI must say so.
+    /// text the user did NOT type — the UI must say so.
     pub completed: bool,
+    /// The not-yet-typed part of the candidate, in TEXT space (the chars/
+    /// letters the engine assumed): "cesh"→测试 gives "试", "congrat"→
+    /// congratulations gives "ulations". Empty for non-completed paths.
+    pub ghost: String,
     /// Path crossed a fuzzy-pinyin arc.
     pub fuzzy: bool,
+}
+
+/// Which part of a completed arc's text the user has NOT typed yet, judged
+/// by reading coverage: a hanzi whose syllable was fully typed is real,
+/// the rest are ghost ("cesh" over 测试: ce complete → 测 real, shi cut at
+/// sh → 试 ghost). English words are a plain byte suffix.
+fn ghost_of(text: &str, spaced: &str, typed: usize) -> String {
+    if text.is_ascii() {
+        return text.get(typed..).unwrap_or("").to_string();
+    }
+    let mut budget = typed;
+    let mut ghost = String::new();
+    for (ch, syl) in text.chars().zip(spaced.split(' ')) {
+        if budget >= syl.len() {
+            budget -= syl.len();
+        } else {
+            ghost.push(ch);
+            budget = 0;
+        }
+    }
+    ghost
 }
 
 /// N-best beam search. `bos` is the interned `<s>` id. Hypotheses ending at
@@ -219,6 +245,7 @@ pub fn decode_topn(
                         pinyin: arc.pinyin,
                         en: arc.kind.is_english(),
                         completed: arc.completed,
+                        typed_len: arc.typed_len,
                         fuzzy: arc.fuzzy,
                     });
                     bucket.insert(
@@ -261,6 +288,7 @@ fn materialize(nodes: &[Node], mut idx: i32, score: f64) -> DecodeResult {
     let mut preedit = String::new();
     let mut prev_en = false;
     let mut completed = false;
+    let mut ghost = String::new();
     let mut fuzzy = false;
     for node in chain {
         if prev_en && node.en {
@@ -268,7 +296,10 @@ fn materialize(nodes: &[Node], mut idx: i32, score: f64) -> DecodeResult {
         }
         text.push_str(node.text);
         prev_en = node.en;
-        completed |= node.completed;
+        if node.completed {
+            completed = true;
+            ghost = ghost_of(node.text, node.pinyin, node.typed_len as usize);
+        }
         fuzzy |= node.fuzzy;
         if !preedit.is_empty() {
             preedit.push(' ');
@@ -280,6 +311,7 @@ fn materialize(nodes: &[Node], mut idx: i32, score: f64) -> DecodeResult {
         preedit,
         score,
         completed,
+        ghost,
         fuzzy,
     }
 }

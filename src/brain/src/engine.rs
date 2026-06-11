@@ -90,16 +90,13 @@ impl Engine {
         .into_iter()
         .map(|r| {
             // The candidate window is the only place the user can SEE what
-            // the engine assumed: a completion shows "+«assumed letters»"
-            // (you typed up to here, the rest is ours), a fuzzy match
-            // shows "~" — without this, completed text reads as if the
-            // user had already typed it and they lose their place.
+            // the engine assumed. Completions mark the ghost in TEXT space
+            // ("自动补全后 ▸后", "congratulations ▸ulations") — everything
+            // after ▸ was assumed, not typed; fuzzy matches show "~".
+            // Without this, completed text reads as if the user had typed
+            // it and they lose their place (observed in real use).
             let comment = if r.completed {
-                let concat: String = r.preedit.chars().filter(|c| *c != ' ').collect();
-                match concat.get(input.len()..) {
-                    Some(assumed) if !assumed.is_empty() => format!("+{}", assumed),
-                    _ => "+".to_string(),
-                }
+                format!("▸{}", r.ghost)
             } else if r.fuzzy {
                 "~".to_string()
             } else {
@@ -155,7 +152,7 @@ mod tests {
             .iter()
             .find(|c| c.text == "你好测")
             .expect("completion candidate");
-        assert_eq!(completed.comment, "+e");
+        assert_eq!(completed.comment, "▸测");
         let raw = cands.iter().find(|c| c.text == "你好c").expect("raw tail");
         assert_eq!(raw.comment, "");
 

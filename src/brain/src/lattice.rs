@@ -164,6 +164,9 @@ pub struct Arc<'a> {
     /// ("congrat" -> congratulations, "shangxiaw" -> 上下文). Penalized;
     /// surfaces in the candidate list as a typing-ahead suggestion.
     pub completed: bool,
+    /// For completed arcs: how many key bytes the user actually typed of
+    /// this arc's reading — the ghost-display boundary.
+    pub typed_len: u16,
     /// Matched through a fuzzy-pinyin variant (in/ing, z/zh...).
     pub fuzzy: bool,
 }
@@ -246,6 +249,7 @@ impl LatticeBuilder {
                         lm_token: e.lm_token,
                         kind: ArcKind::PyChar,
                         completed: false,
+                        typed_len: 0,
                         fuzzy: e.fuzzy,
                     });
                 }
@@ -259,6 +263,7 @@ impl LatticeBuilder {
                         lm_token: e.lm_token,
                         kind: ArcKind::PyWord,
                         completed: false,
+                        typed_len: 0,
                         fuzzy: e.fuzzy,
                     });
                 }
@@ -274,6 +279,7 @@ impl LatticeBuilder {
                             lm_token: e.lm_token,
                             kind: ArcKind::PyPersonal,
                             completed: false,
+                            typed_len: 0,
                             fuzzy: e.fuzzy,
                         });
                     }
@@ -287,6 +293,7 @@ impl LatticeBuilder {
                             lm_token: e.lm_token,
                             kind: ArcKind::EnPersonal,
                             completed: false,
+                            typed_len: 0,
                             fuzzy: e.fuzzy,
                         });
                         seen_en.push((end, e.lm_token));
@@ -305,6 +312,7 @@ impl LatticeBuilder {
                         lm_token: e.lm_token,
                         kind: ArcKind::EnWord,
                         completed: false,
+                        typed_len: 0,
                         fuzzy: e.fuzzy,
                     });
                 }
@@ -326,6 +334,7 @@ impl LatticeBuilder {
                     lm_token,
                     kind: ArcKind::Fallback,
                     completed: false,
+                    typed_len: 0,
                     fuzzy: false,
                 });
             }
@@ -377,6 +386,7 @@ impl LatticeBuilder {
                             lm_token: e.lm_token,
                             kind: ArcKind::PyChar,
                             completed: true,
+                            typed_len: remainder.len() as u16,
                             fuzzy: false,
                         });
                     }
@@ -397,6 +407,7 @@ impl LatticeBuilder {
                             lm_token: e.lm_token,
                             kind: ArcKind::PyWord,
                             completed: true,
+                            typed_len: remainder.len() as u16,
                             fuzzy: false,
                         });
                         budget -= 1;
@@ -416,6 +427,7 @@ impl LatticeBuilder {
                             lm_token: e.lm_token,
                             kind: ArcKind::EnWord,
                             completed: true,
+                            typed_len: remainder.len() as u16,
                             fuzzy: false,
                         });
                         budget -= 1;
@@ -438,6 +450,7 @@ impl LatticeBuilder {
                                 lm_token: e.lm_token,
                                 kind: ArcKind::PyPersonal,
                                 completed: true,
+                                typed_len: remainder.len() as u16,
                                 fuzzy: false,
                             });
                             left -= 1;
@@ -455,6 +468,7 @@ impl LatticeBuilder {
                                 lm_token: e.lm_token,
                                 kind: ArcKind::EnPersonal,
                                 completed: true,
+                                typed_len: remainder.len() as u16,
                                 fuzzy: false,
                             });
                             left -= 1;
