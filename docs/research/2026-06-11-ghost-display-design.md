@@ -46,6 +46,31 @@ ghost range，display attribute 设灰色无下划线；Tab/右箭头接受，�
 - 输入区域（②）与候选区域（③）的分工在阶段 2 后：② 显示已敲拼音 +
   灰色 ghost 读音（可选），③ 显示完整候选 + 灰色 ghost 文字
 
+## 阶段 1 可行性验证（2026-06-11 晚，weasel 0.17.4 源码勘察）
+
+比预期乐观一个量级——**weasel 的 IPC 数据模型已经支持候选内属性区间**：
+
+- `WeaselIPCData.h`：候选 `candies` 是 `vector<Text>`，而 `Text { wstring str;
+  vector<TextAttribute> attributes }`，`TextAttribute { range, type }` 自带
+  区间（现仅 HIGHLIGHTED 一种类型用于 preedit）。**通道已存在，没人用而已**
+- `WeaselPanel.cpp` 609-641：preedit 的前段/高亮段/后段三段绘制就是按属性
+  区间拆段 `_TextOut` 的现成先例；候选目前在 ~887 行单色整段绘制
+- `RimeWithWeasel.cpp` `_GetCandidateInfo`（~498）：只填 `candies[i].str`，
+  attributes 留空——注入点
+
+**阶段 1 改造清单（3 文件，~60 行）**：
+1. `WeaselIPCData.h`：TextAttributeType 加 `GHOST`
+2. `RimeWithWeasel.cpp` `_GetCandidateInfo`：rime comment 以 `▸` 开头时解析
+   ghost 长度 → 给该候选 push `TextAttribute(len-ghost, len, GHOST)`，
+   comment 置空（协议零改动：约定寄生在 comment，brain 侧已在发）
+3. `WeaselPanel.cpp` 候选绘制：有 GHOST 属性时仿 preedit 模式拆两段，
+   ghost 段用 comment_text_color（后续可加 style/ghost_text_color）
+
+**构建链**：boost 复用 librime deps 的 1.89 源码树（weasel 需编译版，
+build.bat boost 步骤补编）；VS2022 BuildTools 既有。构建验证进行中。
+
 ## 现状记录
 
-- 本轮先落阶段 0（文字空间 ▸ 标记），阶段 1/2 归 M5（与续写预测共用通道）
+- 阶段 0（文字空间 ▸ 标记 + preedit ‥ 边界）已上线
+- 阶段 1 可行性确认（上节），等构建链验证通过即可实施；阶段 2（TSF 内联）
+  仍归 M5 与续写预测同批
