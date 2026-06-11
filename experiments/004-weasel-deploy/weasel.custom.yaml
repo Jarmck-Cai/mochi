@@ -1,0 +1,6 @@
+# Mochi：给 aqua 配色方案补 comment 色——ghost 灰字暂借 comment_text_color
+# 渲染（aqua 原本未定义该项，回退成正文同色导致灰字不可见）。
+# 下次 weasel 重编将引入独立的 ghost_text_color 样式项。
+patch:
+  "preset_color_schemes/aqua/comment_text_color": 0x999999
+  "preset_color_schemes/aqua/hilited_comment_text_color": 0xeeeeee

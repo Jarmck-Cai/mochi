@@ -53,6 +53,11 @@ pub struct Candidate {
     pub comment: String,
     pub preedit: String,
     pub quality: f64,
+    /// Input bytes this candidate consumes; less than the query length for
+    /// prefix candidates (局部候选) — the plugin sets the rime candidate
+    /// span from this so partial selection works.
+    #[serde(default)]
+    pub len: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -222,6 +227,7 @@ mod tests {
                 comment: "".to_string(),
                 preedit: "ni hao".to_string(),
                 quality: 1.0,
+                len: 5,
             }],
             elapsed_us: 1234,
         };
@@ -231,6 +237,7 @@ mod tests {
         assert_eq!(json["candidates"][0]["text"], "你好");
         assert_eq!(json["candidates"][0]["preedit"], "ni hao");
         assert_eq!(json["candidates"][0]["quality"], 1.0);
+        assert_eq!(json["candidates"][0]["len"], 5);
         assert_eq!(json["elapsed_us"], 1234);
     }
 

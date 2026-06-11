@@ -153,12 +153,18 @@ struct Node<'a> {
     completed: bool, // typing-ahead arc
     typed_len: u16,  // for completed arcs: key bytes the user actually typed
     fuzzy: bool,     // fuzzy-pinyin arc
+    raw: bool,       // fallback letter arc (incomplete syllable)
 }
 
 pub struct DecodeResult {
     pub text: String,
     pub preedit: String,
     pub score: f64,
+    /// Key bytes this candidate consumes. Less than the input length for
+    /// PREFIX candidates (局部候选): selecting one commits just that span
+    /// and the rest of the input keeps composing — fix one segment of a
+    /// long sentence without retyping it all.
+    pub len: usize,
     /// Path ends in a typing-ahead completion: the candidate contains
     /// text the user did NOT type — the UI must say so.
     pub completed: bool,
@@ -168,7 +174,18 @@ pub struct DecodeResult {
     pub ghost: String,
     /// Path crossed a fuzzy-pinyin arc.
     pub fuzzy: bool,
+    /// Path contains raw fallback letters (incomplete syllable somewhere) —
+    /// fine for full candidates (unfinished tail), disqualifying for prefix
+    /// candidates (a mid-syllable cut is not a meaningful repair boundary).
+    pub raw: bool,
 }
+
+/// How many prefix candidates join the list, and where: the first
+/// FULL_BEFORE_PREFIX full-span candidates stay on top (the whole-sentence
+/// reading is the headline), prefixes follow (longest first — the natural
+/// repair order), then the remaining full-span variants.
+const PREFIX_CAP: usize = 6;
+const FULL_BEFORE_PREFIX: usize = 3;
 
 /// Which part of a completed arc's text the user has NOT typed yet, judged
 /// by reading coverage: a hanzi whose syllable was fully typed is real,
@@ -247,6 +264,7 @@ pub fn decode_topn(
                         completed: arc.completed,
                         typed_len: arc.typed_len,
                         fuzzy: arc.fuzzy,
+                        raw: matches!(arc.kind, ArcKind::Fallback | ArcKind::FallbackTail),
                     });
                     bucket.insert(
                         state,
@@ -262,21 +280,63 @@ pub fn decode_topn(
     }
     let mut finals: Vec<&Hyp> = beams[n].values().collect();
     finals.sort_by(|a, b| b.score.total_cmp(&a.score));
-    let mut results: Vec<DecodeResult> = Vec::with_capacity(topn);
+    let mut full: Vec<DecodeResult> = Vec::with_capacity(topn);
     for hyp in finals {
-        let r = materialize(&nodes, hyp.node, hyp.score);
-        if results.iter().any(|prev| prev.text == r.text) {
+        let r = materialize(&nodes, hyp.node, hyp.score, n);
+        if full.iter().any(|prev| prev.text == r.text) {
             continue;
         }
-        results.push(r);
-        if results.len() >= topn {
+        full.push(r);
+        if full.len() >= topn {
             break;
         }
     }
+
+    // Prefix candidates (局部候选): the best hypothesis ending at each
+    // earlier position, longest first. Selecting one commits only that
+    // span; the remaining keys keep composing (rime re-queries them) —
+    // the repair path for long sentences with one bad segment.
+    //
+    // Mid-syllable cuts are weeded out two ways: raw fallback letters in
+    // the path, and a per-key score gate — a cut that forces a junk parse
+    // ("常用词很zh on") pays visibly more per key than the top reading.
+    let top_per_key = full.first().map(|f| f.score / n as f64);
+    let mut prefixes: Vec<DecodeResult> = Vec::new();
+    for p in (1..n).rev() {
+        if prefixes.len() >= PREFIX_CAP {
+            break;
+        }
+        let best = beams[p]
+            .values()
+            .max_by(|a, b| a.score.total_cmp(&b.score));
+        if let Some(hyp) = best {
+            let r = materialize(&nodes, hyp.node, hyp.score, p);
+            let junk = match top_per_key {
+                Some(t) => (r.score / p as f64) < t - 0.5,
+                None => false,
+            };
+            if r.completed
+                || r.raw
+                || junk
+                || full.iter().any(|f| f.text == r.text)
+                || prefixes.iter().any(|q| q.text == r.text)
+            {
+                continue;
+            }
+            prefixes.push(r);
+        }
+    }
+
+    // headline full readings, then repairs, then the long tail of variants
+    let mut results = Vec::with_capacity(full.len() + prefixes.len());
+    let rest = full.split_off(full.len().min(FULL_BEFORE_PREFIX));
+    results.extend(full);
+    results.extend(prefixes);
+    results.extend(rest);
     results
 }
 
-fn materialize(nodes: &[Node], mut idx: i32, score: f64) -> DecodeResult {
+fn materialize(nodes: &[Node], mut idx: i32, score: f64, len: usize) -> DecodeResult {
     let mut chain: Vec<&Node> = Vec::new();
     while idx >= 0 {
         let node = &nodes[idx as usize];
@@ -290,6 +350,7 @@ fn materialize(nodes: &[Node], mut idx: i32, score: f64) -> DecodeResult {
     let mut completed = false;
     let mut ghost = String::new();
     let mut fuzzy = false;
+    let mut raw = false;
     for node in chain {
         if prev_en && node.en {
             text.push(' '); // English run: "timewindow" -> "time window"
@@ -297,6 +358,7 @@ fn materialize(nodes: &[Node], mut idx: i32, score: f64) -> DecodeResult {
         text.push_str(node.text);
         prev_en = node.en;
         fuzzy |= node.fuzzy;
+        raw |= node.raw;
         if !preedit.is_empty() {
             preedit.push(' ');
         }
@@ -329,9 +391,11 @@ fn materialize(nodes: &[Node], mut idx: i32, score: f64) -> DecodeResult {
         text,
         preedit,
         score,
+        len,
         completed,
         ghost,
         fuzzy,
+        raw,
     }
 }
 
@@ -355,8 +419,10 @@ mod tests {
         assert_eq!(r[0].text, "你好");
         assert_eq!(r[0].preedit, "ni hao");
         assert!(r.len() >= 2, "n-best should offer alternatives");
-        // scores strictly ordered
-        assert!(r.windows(2).all(|w| w[0].score >= w[1].score));
+        // scores ordered among full-span candidates (prefix candidates are
+        // shorter paths — their scores live on a different scale)
+        let full: Vec<&DecodeResult> = r.iter().filter(|c| c.len == 5).collect();
+        assert!(full.windows(2).all(|w| w[0].score >= w[1].score));
     }
 
     #[test]
@@ -425,9 +491,10 @@ mod tests {
     #[test]
     fn fallback_keeps_lattice_connected() {
         let r = top("nivvv", 1);
-        assert_eq!(r.len(), 1);
+        // topn=1 full candidate, prefix repairs may follow
         assert!(r[0].text.starts_with("你") || r[0].text.contains('v'));
         assert!(r[0].text.ends_with("vvv"));
+        assert_eq!(r[0].len, 5);
     }
 
     #[test]

@@ -107,6 +107,7 @@ impl Engine {
                 comment,
                 preedit: r.preedit,
                 quality: r.score,
+                len: r.len as u64,
             }
         })
         .collect()
@@ -137,8 +138,25 @@ mod tests {
         let cands = e.query("nihao", None);
         assert_eq!(cands[0].text, "你好");
         assert_eq!(cands[0].preedit, "ni hao");
-        assert!(cands.len() <= 5);
-        assert!(cands.windows(2).all(|w| w[0].quality >= w[1].quality));
+        assert_eq!(cands[0].len, 5);
+        // full candidates (topn) plus a bounded number of prefix repairs
+        assert!(cands.len() <= 5 + 6);
+    }
+
+    /// 局部候选: a long input offers prefix candidates that consume only
+    /// part of the keys — selecting one repairs a segment and leaves the
+    /// rest composing (rime re-queries the remainder).
+    #[test]
+    fn prefix_candidates_enable_partial_selection() {
+        let e = Engine::mini();
+        let cands = e.query("woyaoceshi", None);
+        assert_eq!(cands[0].text, "我要测试");
+        assert_eq!(cands[0].len, 10);
+        assert!(
+            cands.iter().any(|c| c.text == "我要" && c.len == 5),
+            "prefix candidate 我要 (len 5) expected"
+        );
+        assert!(cands.iter().any(|c| c.text == "我" && c.len == 2));
     }
 
     /// What the engine assumed must be visible: completions carry

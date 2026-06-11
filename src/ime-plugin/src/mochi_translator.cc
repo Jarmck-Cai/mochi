@@ -103,9 +103,17 @@ an<Translation> MochiTranslator::Query(const string& input,
           const std::string text = c.GetString("text");
           if (text.empty())
             continue;
+          // Prefix candidates (局部候选) consume only `len` input bytes:
+          // the candidate span ends early and rime keeps the remaining
+          // keys composing after selection — segment-level repair.
+          const size_t seg_len = segment.end - segment.start;
+          size_t consumed =
+              static_cast<size_t>(c.GetNumber("len", (double)seg_len));
+          if (consumed == 0 || consumed > seg_len)
+            consumed = seg_len;
           auto candidate = New<SimpleCandidate>(
-              "mochi", segment.start, segment.end, text, c.GetString("comment"),
-              c.GetString("preedit"));
+              "mochi", segment.start, segment.start + consumed, text,
+              c.GetString("comment"), c.GetString("preedit"));
           candidate->set_quality(c.GetNumber("quality"));
           translation->Append(candidate);
         }
