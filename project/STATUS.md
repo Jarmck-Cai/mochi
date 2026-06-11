@@ -41,14 +41,15 @@
 - **M2 正式验收**：真实使用对比微软拼音（协议见 experiments/004 README：20 句混打切换次数 + 整句准确率，建议 ≥3 天）
 
 - [x] **第二轮反馈闭环（2026-06-11 下午）**：① 英文连写——连续英文弧切换成本只收一次（en_continue -0.5）+ 相邻英文词自动空格，`timewindow`→"time window"、`deeplearning`→"deep learning"；② **纠正信号检测**——同输入改选 = 纠正：新选择 3 倍加权、被否定事件按记录的精确增量回撤（RecentCommit 存实际计入的 token 句子，免疫短语促升导致的分词漂移），journal 仍存原始事实、回放重新解释（确定性测试过）。"桔子案例"翻回"句子" ✓。42 单测全过
+- [x] **M3 打磨包第一期（2026-06-11 第三轮反馈闭环）**：① **尾部补全弧**（音节/词 key/英文词/个人词四路，惩罚 -2.0）——`congrat`→congratulations、`separ`→separate、`shangxiaw`→上下文、`eeg` 次选 EEGLab（个人补全）；② **模糊音**（z/zh c/ch s/sh in/ing en/eng an/ang，单音节变体，惩罚 -1.5）——`pinying`→拼音；③ **英文底座**：wordfreq top-50k + zipf 频率 λ=0.3 混入 unigram（英文词第一次有彼此排序）。44 单测全过。详见 devlog 2026-06-11-打磨包第一期
 
 ## 下一步（按优先级）
 
-1. brain 自动拉起（插件 EnsureConnected 失败时 CreateProcess，或注册开机启动）——已经历一次"重启后 brain 没了"，体验前置项
-2. **M3 打磨包第一期**：模糊音（in/ing、z/zh 等规则变体，惩罚 ~-1.5，"屏营→拼音"案例）+ 尾部不完整音节前缀补全（`shangxiaw`→上下文）——已与用户对齐方向
-3. 中期：现代大语料重训 trigram（上下文消歧质变，"整句准确率 ≥ 微软拼音"的必要条件，M3 排期）；键内 typo 容错（`wn`→wen）押后到 M4 与置信度机制同批；预测式补全归 M5
-4. 管道抢注防护（FIRST_PIPE_INSTANCE + ACL，产品化前）
-5. UIA 补测（M5 前完成即可）
+1. 真实使用观察打磨包体感（补全噪声水平、模糊音误报、50k 词表低频词噪声——必要时按 rank 加先验斜坡）
+2. brain 自动拉起（插件 EnsureConnected 失败时 CreateProcess，或注册开机启动）——已经历一次"重启后 brain 没了"，体验前置项
+3. 加载时间正常功耗复测（低功耗态 24.6s/归一化 ≈2s）；超 3s 则上二进制缓存。底座变更前先备份 artifacts 供 A/B（这轮漏了）
+4. 中期：现代大语料重训 trigram（M3 二期，"整句准确率 ≥ 微软拼音"必要条件）；键内 typo 容错（`seperate`/`wn`）归 M4 与置信度同批；ghost 灰色内联归 M5（补全候选 = 其阶段 1）
+5. 管道抢注防护（FIRST_PIPE_INSTANCE + ACL，产品化前）；UIA 补测（M5 前）
 
 ## 阻塞 / 待用户决策
 

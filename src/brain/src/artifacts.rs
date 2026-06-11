@@ -80,6 +80,22 @@ impl Artifacts {
             *t = interner.intern(letter.encode_utf8(&mut [0u8; 4]));
         }
 
+        // completion indexes: canonical (non-fuzzy) keys only — completing
+        // through a fuzzy variant would stack two speculations
+        let mut word_key_index: Vec<Box<str>> = word_matcher
+            .keys()
+            .filter(|k| {
+                word_matcher
+                    .get(k)
+                    .is_some_and(|es| es.iter().any(|e| !e.fuzzy))
+            })
+            .map(Into::into)
+            .collect();
+        word_key_index.sort_unstable();
+        let mut en_key_index: Vec<Box<str>> = en_matcher.keys().map(Into::into).collect();
+        en_key_index.sort_unstable();
+        let syllable_index = syllables.to_sorted();
+
         lm.finalize(interner.len());
 
         let ngrams = lm.stats();
@@ -103,6 +119,9 @@ impl Artifacts {
                 word_matcher,
                 en_matcher,
                 letter_tokens,
+                word_key_index,
+                en_key_index,
+                syllable_index,
             },
             syllables,
             bos,
@@ -174,6 +193,57 @@ struct DictTables {
     char_pinyin: FxHashMap<char, Vec<Box<str>>>,
 }
 
+/// Fuzzy-pinyin variants of one syllable (the common confusion pairs).
+/// One rule application each — onset and rime variants are generated
+/// separately, never combined.
+fn fuzzy_syllable_variants(syl: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    // onsets: zh/z, ch/c, sh/s
+    for (a, b) in [("zh", "z"), ("ch", "c"), ("sh", "s")] {
+        if let Some(rest) = syl.strip_prefix(a) {
+            out.push(format!("{}{}", b, rest));
+        } else if let Some(rest) = syl.strip_prefix(b) {
+            // careful: "s" also prefixes "sh" — strip_prefix("zh") above
+            // already consumed those, but "sh".strip_prefix("s") would hit
+            // here; skip when the result would just undo the digraph
+            if !rest.starts_with('h') {
+                out.push(format!("{}{}", a, rest));
+            }
+        }
+    }
+    // rimes: ing/in, eng/en, ang/an
+    for (long, short) in [("ing", "in"), ("eng", "en"), ("ang", "an")] {
+        if let Some(stem) = syl.strip_suffix(long) {
+            out.push(format!("{}{}", stem, short));
+        } else if let Some(stem) = syl.strip_suffix(short) {
+            out.push(format!("{}{}", stem, long));
+        }
+    }
+    out
+}
+
+/// Variant CONCAT keys for a spaced pinyin key, changing one syllable per
+/// variant (multi-syllable typos are almost always single-syllable slips;
+/// full combination would explode the matcher).
+fn fuzzy_variant_keys(spaced: &str) -> Vec<String> {
+    let syls: Vec<&str> = spaced.split(' ').collect();
+    let mut out = Vec::new();
+    for (j, syl) in syls.iter().enumerate() {
+        for variant in fuzzy_syllable_variants(syl) {
+            let mut key = String::new();
+            for (k, s) in syls.iter().enumerate() {
+                if k == j {
+                    key.push_str(&variant);
+                } else {
+                    key.push_str(s);
+                }
+            }
+            out.push(key);
+        }
+    }
+    out
+}
+
 /// dict.tsv: `key<TAB>text<TAB>weight`, key = space-separated syllables.
 /// Splits entries into char/word matchers keeping the top-N per pinyin key
 /// by (weight desc, text desc), mirroring lattice.py.
@@ -233,12 +303,27 @@ fn parse_dict(text: &str, interner: &mut Interner) -> Result<DictTables, String>
             for (_, text, spaced) in cands {
                 let lm_token = interner.intern(&text);
                 dict_tokens.insert(lm_token);
+                // fuzzy-pinyin variant keys (one syllable changed each);
+                // the entry keeps the canonical reading — showing the right
+                // pinyin in the preedit IS the correction
+                for vkey in fuzzy_variant_keys(&spaced) {
+                    matcher.add(
+                        &vkey,
+                        Entry {
+                            text: text.clone(),
+                            pinyin: spaced.clone(),
+                            lm_token,
+                            fuzzy: true,
+                        },
+                    );
+                }
                 matcher.add(
                     &key,
                     Entry {
                         text,
                         pinyin: spaced,
                         lm_token,
+                        fuzzy: false,
                     },
                 );
             }
@@ -276,6 +361,7 @@ fn parse_english(text: &str, interner: &mut Interner) -> Result<(Matcher, usize)
                 text: word.into(), // surface keeps source casing
                 pinyin: lower.into(),
                 lm_token,
+                fuzzy: false,
             },
         );
         n += 1;

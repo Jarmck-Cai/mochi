@@ -28,6 +28,10 @@ pub struct ArcPriors {
     pub en_continue: f64,
     pub fallback: f64,
     pub fallback_tail: f64,
+    /// Added on top of the kind prior for typing-ahead completion arcs.
+    pub completion: f64,
+    /// Added for fuzzy-pinyin matches: exact spelling always outranks.
+    pub fuzzy: f64,
 }
 
 impl Default for ArcPriors {
@@ -43,6 +47,8 @@ impl Default for ArcPriors {
             // unfinished tail: keeping raw letters is the *expected* display
             // while a syllable is half-typed, so the cost is mild
             fallback_tail: -1.5,
+            completion: -2.0,
+            fuzzy: -1.5,
         }
     }
 }
@@ -119,6 +125,12 @@ impl<'a> Scorer<'a> {
         } else {
             self.priors.of(arc.kind)
         };
+        if arc.completed {
+            score += self.priors.completion;
+        }
+        if arc.fuzzy {
+            score += self.priors.fuzzy;
+        }
         if self.lambda_lexicon > 0.0 {
             score += self.lambda_lexicon * self.personal.lexicon_bonus(arc.lm_token);
         }
@@ -311,11 +323,36 @@ mod tests {
     }
 
     #[test]
-    fn unfinished_tail_stays_raw() {
-        // half-typed syllable: best candidate keeps the tail as letters
-        let r = top("woyaoc", 1);
-        assert_eq!(r[0].text, "我要c");
-        assert_eq!(r[0].preedit, "wo yao c");
+    fn unfinished_tail_completes_and_keeps_raw_variant() {
+        // half-typed syllable: typing-ahead completion ranks first ("c" is
+        // a prefix of ce -> 测), the literal raw-tail variant stays available
+        let r = top("woyaoc", 5);
+        assert_eq!(r[0].text, "我要测");
+        assert_eq!(r[0].preedit, "wo yao ce");
+        assert!(r.iter().any(|c| c.text == "我要c"), "raw tail must survive");
+    }
+
+    #[test]
+    fn completion_finishes_words_and_english() {
+        // dict word-key completion: "cesh" is a strict prefix of "ceshi"
+        let r = top("woyaocesh", 1);
+        assert_eq!(r[0].text, "我要测试");
+        // english completion: "tes" -> test
+        let r = top("tes", 5);
+        assert!(r.iter().any(|c| c.text == "test"));
+    }
+
+    #[test]
+    fn fuzzy_pinyin_matches_with_penalty() {
+        // z/zh: typing "zongwen" still reaches 中文, preedit shows the
+        // canonical reading (the correction itself)
+        let r = top("zongwen", 3);
+        assert_eq!(r[0].text, "中文");
+        assert_eq!(r[0].preedit, "zhong wen");
+        // exact spelling is unaffected and scores strictly better
+        let exact = top("zhongwen", 1);
+        assert_eq!(exact[0].text, "中文");
+        assert!(exact[0].score > r[0].score);
     }
 
     #[test]

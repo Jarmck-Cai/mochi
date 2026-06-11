@@ -632,6 +632,7 @@ impl PersonalStore {
                 text: word.into(),
                 pinyin: spaced.into(),
                 lm_token: tok,
+                fuzzy: false,
             },
         );
         self.zh_added.insert(tok);
@@ -670,6 +671,7 @@ impl PersonalStore {
                 text: best.clone(),
                 pinyin: lower.into(),
                 lm_token: tok,
+                fuzzy: false,
             },
         );
         self.en_added.insert(tok);

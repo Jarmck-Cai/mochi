@@ -40,7 +40,7 @@ from pipeline.lm import BackoffTrigramLM
 
 DICT_SOURCE = "rime pinyin_simp (data/dict/pinyin_simp.dict.yaml)"
 CORPUS_SOURCE = "SIGHAN bakeoff pku+msr (data/general/, full, no holdout)"
-ENGLISH_SOURCE = "google-10000-english (data/english/google-10000-english.txt)"
+ENGLISH_SOURCE = "wordfreq top-50k (en), zipf frequencies"
 ESSAY_SOURCE = "rime essay 八股文 (data/dict/essay.txt, opencc t2s)"
 
 
@@ -151,25 +151,27 @@ def train_full_general_lm(data_dir: Path) -> BackoffTrigramLM:
     return lm
 
 
-def blend_essay_unigrams(
-    lm: BackoffTrigramLM, essay: dict[str, float], lam: float
-) -> None:
-    """Mix essay word frequencies into the unigram table.
+def blend_unigrams(
+    lm: BackoffTrigramLM,
+    counts: dict[str, float],
+    lam: float,
+    base_total: float,
+    label: str,
+) -> float:
+    """Mix an external word-frequency table into the unigram rung.
 
-    new_uni(w) = corpus(w) + essay(w) · (corpus_total/essay_total) · λ
-    so λ is the essay share relative to the whole corpus (λ=1 → 50/50).
-    Only the unigram backoff rung changes: bigram/trigram paths and their
-    denominators stay corpus-pure (essay has no context information).
+    new_uni(w) = corpus(w) + freq(w) · (base_total/Σfreq) · λ
+    so λ is this source's share relative to the corpus mass. Returns the
+    added mass (base_total·λ); the caller updates lm.total once after all
+    blends. Bigram/trigram paths and their denominators stay corpus-pure
+    (frequency tables carry no context information).
     """
-    corpus_total = lm.total
-    factor = corpus_total * lam / max(1.0, sum(essay.values()))
-    for w, c in essay.items():
+    factor = base_total * lam / max(1.0, sum(counts.values()))
+    for w, c in counts.items():
         lm.uni[w] = lm.uni.get(w, 0.0) + c * factor
-    lm.total = corpus_total * (1.0 + lam)
-    log(
-        f"unigram blend: λ={lam}, {len(essay):,} essay words mixed, "
-        f"total_tokens {corpus_total:,.0f} -> {lm.total:,.0f}"
-    )
+    added = base_total * lam
+    log(f"unigram blend [{label}]: λ={lam}, {len(counts):,} words, +{added:,.0f} mass")
+    return added
 
 
 def export_ngram(lm: BackoffTrigramLM, out_path: Path) -> dict[str, int]:
@@ -198,25 +200,31 @@ def export_ngram(lm: BackoffTrigramLM, out_path: Path) -> dict[str, int]:
 
 
 # -------------------------------------------------------------- english.tsv
-def export_english(data_dir: Path, out_path: Path) -> int:
-    words_raw = (
-        (data_dir / "english" / "google-10000-english.txt")
-        .read_text(encoding="utf-8")
-        .splitlines()
-    )
-    seen: set[str] = set()
+def export_english(out_path: Path) -> tuple[int, dict[str, float]]:
+    """wordfreq top-50k with zipf-derived frequencies.
+
+    Returns (word count, word -> relative frequency) — the frequencies feed
+    the unigram blend so English words rank against each other (the old
+    10k list had no usable weights; every English word scored the OOV
+    floor, so e.g. congratulations vs junk parses was a coin flip).
+    """
+    import re
+
+    from wordfreq import top_n_list, zipf_frequency
+
+    word_re = re.compile(r"^[a-z]{2,20}$")
+    freqs: dict[str, float] = {}
     rank = 0
     with open(out_path, "w", encoding="utf-8", newline="\n") as f:
         f.write("# word<TAB>rank\n")
-        for w in words_raw:
-            w = w.strip()
-            if not w or w in seen:
+        for w in top_n_list("en", 50000):
+            if not word_re.match(w):
                 continue
-            seen.add(w)
             rank += 1
             f.write(f"{w}\t{rank}\n")
-    log(f"english.tsv: {rank:,} words")
-    return rank
+            freqs[w] = 10.0 ** zipf_frequency(w, "en")  # relative scale
+    log(f"english.tsv: {rank:,} words (wordfreq top-50k)")
+    return rank, freqs
 
 
 # ------------------------------------------------------------------- driver
@@ -239,6 +247,12 @@ def main() -> None:
         default=1.0,
         help="essay share of unigram mass relative to the corpus (1.0 = 50/50)",
     )
+    ap.add_argument(
+        "--english-lambda",
+        type=float,
+        default=0.3,
+        help="english-frequency share of unigram mass (typing is mostly Chinese)",
+    )
     args = ap.parse_args()
 
     data_dir = ROOT / "data"
@@ -253,11 +267,19 @@ def main() -> None:
         log(f"WARNING: essay file not found at {args.essay}; building without it")
 
     n_dict, n_essay_words = export_dict(data_dir, out_dir / "dict.tsv", essay)
+    n_english, english_freqs = export_english(out_dir / "english.tsv")
     lm = train_full_general_lm(data_dir)
+    base_total = lm.total
+    added = 0.0
     if essay:
-        blend_essay_unigrams(lm, essay, args.essay_lambda)
+        added += blend_unigrams(lm, essay, args.essay_lambda, base_total, "essay")
+    if english_freqs:
+        added += blend_unigrams(
+            lm, english_freqs, args.english_lambda, base_total, "english"
+        )
+    lm.total = base_total + added
+    log(f"total_tokens {base_total:,.0f} -> {lm.total:,.0f}")
     ngram_counts = export_ngram(lm, out_dir / "ngram.tsv")
-    n_english = export_english(data_dir, out_dir / "english.tsv")
 
     meta = {
         "v": 0,
@@ -272,6 +294,7 @@ def main() -> None:
             "backoff": f"stupid:{lm.alpha}",
             "min_trigram": 1.0,
             **({"essay_lambda": args.essay_lambda} if essay else {}),
+            "english_lambda": args.english_lambda,
         },
         "counts": {
             "dict": n_dict,

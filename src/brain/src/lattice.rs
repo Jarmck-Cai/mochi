@@ -36,10 +36,14 @@ pub struct Entry {
     /// Surface form emitted when the arc is taken.
     pub text: Box<str>,
     /// Space-separated pinyin syllables (for preedit); for English entries
-    /// this is just the word itself.
+    /// this is just the word itself. Always the CANONICAL reading — a fuzzy
+    /// entry shows the correct pinyin, which is the correction itself.
     pub pinyin: Box<str>,
     /// Interned LM token (lowercase for English, surface for hanzi).
     pub lm_token: u32,
+    /// Stored under a fuzzy-variant key (in/ing, z/zh...): scored with a
+    /// penalty so the exact spelling always outranks the tolerated one.
+    pub fuzzy: bool,
 }
 
 /// FxHash of a byte slice (prefix-set key). Storing 8-byte hashes instead
@@ -107,6 +111,33 @@ impl Matcher {
         }
     }
 
+    /// Entries stored under exactly `key`.
+    pub fn get(&self, key: &str) -> Option<&[Entry]> {
+        self.entries.get(key).map(|v| v.as_slice())
+    }
+
+    /// All keys (for building sorted completion indexes at load).
+    pub fn keys(&self) -> impl Iterator<Item = &str> {
+        self.entries.keys().map(|k| k.as_ref())
+    }
+
+    /// Linear prefix scan for SMALL matchers (the personal layer): calls
+    /// `f(key, entries)` for every key strictly extending `prefix`.
+    pub fn for_completions<'a>(
+        &'a self,
+        prefix: &str,
+        mut f: impl FnMut(&'a str, &'a [Entry]),
+    ) {
+        if prefix.is_empty() {
+            return;
+        }
+        for (k, v) in &self.entries {
+            if k.len() > prefix.len() && k.starts_with(prefix) {
+                f(k, v);
+            }
+        }
+    }
+
     pub fn est_bytes(&self) -> usize {
         let mut bytes = 0;
         for (k, v) in &self.entries {
@@ -129,6 +160,12 @@ pub struct Arc<'a> {
     pub pinyin: &'a str,
     pub lm_token: u32,
     pub kind: ArcKind,
+    /// The key stream only PREFIXES this word — the arc completes the rest
+    /// ("congrat" -> congratulations, "shangxiaw" -> 上下文). Penalized;
+    /// surfaces in the candidate list as a typing-ahead suggestion.
+    pub completed: bool,
+    /// Matched through a fuzzy-pinyin variant (in/ing, z/zh...).
+    pub fuzzy: bool,
 }
 
 /// Personal-layer matchers joining the lattice (borrowed from the
@@ -139,12 +176,49 @@ pub struct PersonalMatchers<'p> {
     pub en: &'p Matcher,
 }
 
+/// Completion limits: a prefix must be constraining enough to complete
+/// (an alphabetical range scan over thousands of keys would surface junk),
+/// and each source contributes a bounded number of arcs — the LM ranks.
+const COMPLETE_MIN_PREFIX: usize = 3; // static word/english completion
+const COMPLETE_MIN_PREFIX_PERSONAL: usize = 2; // personal words are few and precious
+const COMPLETE_RANGE_CAP: usize = 300; // skip unconstrained prefixes entirely
+const COMPLETE_WORDS_CAP: usize = 6;
+const COMPLETE_EN_CAP: usize = 12;
+const COMPLETE_CHARS_PER_SYL: usize = 4;
+const COMPLETE_PERSONAL_CAP: usize = 4;
+
 pub struct LatticeBuilder {
     pub char_matcher: Matcher,
     pub word_matcher: Matcher,
     pub en_matcher: Matcher,
     /// Interned ids for single letters a-z (fallback arcs), index = letter - b'a'.
     pub letter_tokens: [u32; 26],
+    /// Sorted canonical keys for completion lookups (binary search + scan).
+    pub word_key_index: Vec<Box<str>>,
+    pub en_key_index: Vec<Box<str>>,
+    pub syllable_index: Vec<Box<str>>,
+}
+
+/// Iterate keys in `index` that strictly extend `prefix`; gives up (calls
+/// nothing) when the range exceeds COMPLETE_RANGE_CAP — too unconstrained.
+fn for_prefix_range<'a>(
+    index: &'a [Box<str>],
+    prefix: &str,
+    mut f: impl FnMut(&'a str) -> bool, // return false to stop early
+) {
+    let start = index.partition_point(|k| k.as_ref() < prefix);
+    let mut end = start;
+    while end < index.len() && end - start <= COMPLETE_RANGE_CAP && index[end].starts_with(prefix) {
+        end += 1;
+    }
+    if end - start > COMPLETE_RANGE_CAP {
+        return;
+    }
+    for k in &index[start..end] {
+        if k.len() > prefix.len() && !f(k) {
+            break;
+        }
+    }
 }
 
 impl LatticeBuilder {
@@ -171,6 +245,8 @@ impl LatticeBuilder {
                         pinyin: &e.pinyin,
                         lm_token: e.lm_token,
                         kind: ArcKind::PyChar,
+                        completed: false,
+                        fuzzy: e.fuzzy,
                     });
                 }
             });
@@ -182,6 +258,8 @@ impl LatticeBuilder {
                         pinyin: &e.pinyin,
                         lm_token: e.lm_token,
                         kind: ArcKind::PyWord,
+                        completed: false,
+                        fuzzy: e.fuzzy,
                     });
                 }
             });
@@ -195,6 +273,8 @@ impl LatticeBuilder {
                             pinyin: &e.pinyin,
                             lm_token: e.lm_token,
                             kind: ArcKind::PyPersonal,
+                            completed: false,
+                            fuzzy: e.fuzzy,
                         });
                     }
                 });
@@ -206,6 +286,8 @@ impl LatticeBuilder {
                             pinyin: &keys[i..end],
                             lm_token: e.lm_token,
                             kind: ArcKind::EnPersonal,
+                            completed: false,
+                            fuzzy: e.fuzzy,
                         });
                         seen_en.push((end, e.lm_token));
                     }
@@ -222,10 +304,15 @@ impl LatticeBuilder {
                         pinyin: &keys[i..end],
                         lm_token: e.lm_token,
                         kind: ArcKind::EnWord,
+                        completed: false,
+                        fuzzy: e.fuzzy,
                     });
                 }
             });
-            if out.is_empty() {
+            self.push_completions(keys, i, personal, out);
+            // completion arcs are speculative: the position still needs its
+            // literal fallback so the raw-tail candidate (我要c) survives
+            if out.iter().all(|a| a.completed) {
                 let b = keys.as_bytes()[i];
                 let lm_token = if b.is_ascii_lowercase() {
                     self.letter_tokens[(b - b'a') as usize]
@@ -238,22 +325,144 @@ impl LatticeBuilder {
                     pinyin: &keys[i..i + 1],
                     lm_token,
                     kind: ArcKind::Fallback,
+                    completed: false,
+                    fuzzy: false,
                 });
             }
         }
-        // The maximal all-fallback suffix is an *unfinished* pinyin tail (the
-        // user is still typing): those letters stay raw cheaply instead of
-        // being force-read as junk short English words or odd char splits
-        // ("woyaoc" must show 我要c, not 我压oc).
+        // The maximal suffix where nothing matched is an *unfinished* pinyin
+        // tail (the user is still typing): those letters stay raw cheaply
+        // instead of being force-read as junk short English words or odd
+        // char splits ("woyaoc" must show 我要c, not 我压oc).
         for pos in (0..n).rev() {
-            if !arcs[pos].iter().all(|a| a.kind == ArcKind::Fallback) {
+            if !arcs[pos]
+                .iter()
+                .filter(|a| !a.completed)
+                .all(|a| a.kind == ArcKind::Fallback)
+            {
                 break;
             }
             for arc in arcs[pos].iter_mut() {
-                arc.kind = ArcKind::FallbackTail;
+                if arc.kind == ArcKind::Fallback {
+                    arc.kind = ArcKind::FallbackTail;
+                }
             }
         }
         arcs
+    }
+
+    /// Typing-ahead arcs: when the remaining keys `keys[i..]` are a strict
+    /// prefix of a syllable / word key / English word / personal word, lay
+    /// a penalized arc completing it to the end of input. This is the
+    /// candidate-window stage of prediction: "congrat" proposes
+    /// congratulations, "shangxiaw" proposes 上下文.
+    fn push_completions<'a>(
+        &'a self,
+        keys: &'a str,
+        i: usize,
+        personal: Option<PersonalMatchers<'a>>,
+        out: &mut Vec<Arc<'a>>,
+    ) {
+        let n = keys.len();
+        let remainder = &keys[i..];
+        // trailing partial syllable -> its top chars ("w" -> 文/我/万...)
+        if remainder.len() <= 5 {
+            for_prefix_range(&self.syllable_index, remainder, |syl| {
+                if let Some(entries) = self.char_matcher.get(syl) {
+                    for e in entries.iter().filter(|e| !e.fuzzy).take(COMPLETE_CHARS_PER_SYL) {
+                        out.push(Arc {
+                            end: n,
+                            text: &e.text,
+                            pinyin: &e.pinyin,
+                            lm_token: e.lm_token,
+                            kind: ArcKind::PyChar,
+                            completed: true,
+                            fuzzy: false,
+                        });
+                    }
+                }
+                true
+            });
+        }
+        if remainder.len() >= COMPLETE_MIN_PREFIX {
+            // dictionary word keys ("shangxiaw" -> 上下文)
+            let mut budget = COMPLETE_WORDS_CAP;
+            for_prefix_range(&self.word_key_index, remainder, |key| {
+                if let Some(entries) = self.word_matcher.get(key) {
+                    if let Some(e) = entries.iter().find(|e| !e.fuzzy) {
+                        out.push(Arc {
+                            end: n,
+                            text: &e.text,
+                            pinyin: &e.pinyin,
+                            lm_token: e.lm_token,
+                            kind: ArcKind::PyWord,
+                            completed: true,
+                            fuzzy: false,
+                        });
+                        budget -= 1;
+                    }
+                }
+                budget > 0
+            });
+            // English vocabulary ("congrat" -> congratulations)
+            let mut budget = COMPLETE_EN_CAP;
+            for_prefix_range(&self.en_key_index, remainder, |key| {
+                if let Some(entries) = self.en_matcher.get(key) {
+                    if let Some(e) = entries.iter().find(|e| !e.fuzzy) {
+                        out.push(Arc {
+                            end: n,
+                            text: &e.text,
+                            pinyin: &e.pinyin,
+                            lm_token: e.lm_token,
+                            kind: ArcKind::EnWord,
+                            completed: true,
+                            fuzzy: false,
+                        });
+                        budget -= 1;
+                    }
+                }
+                budget > 0
+            });
+        }
+        // personal words: few, high-value, allowed at shorter prefixes
+        if remainder.len() >= COMPLETE_MIN_PREFIX_PERSONAL {
+            if let Some(p) = personal {
+                let mut left = COMPLETE_PERSONAL_CAP;
+                p.zh.for_completions(remainder, |_k, entries| {
+                    for e in entries.iter().take(1) {
+                        if left > 0 {
+                            out.push(Arc {
+                                end: n,
+                                text: &e.text,
+                                pinyin: &e.pinyin,
+                                lm_token: e.lm_token,
+                                kind: ArcKind::PyPersonal,
+                                completed: true,
+                                fuzzy: false,
+                            });
+                            left -= 1;
+                        }
+                    }
+                });
+                let mut left = COMPLETE_PERSONAL_CAP;
+                p.en.for_completions(remainder, |_k, entries| {
+                    for e in entries.iter().take(1) {
+                        if left > 0 {
+                            out.push(Arc {
+                                end: n,
+                                text: &e.text,
+                                pinyin: &e.pinyin,
+                                lm_token: e.lm_token,
+                                kind: ArcKind::EnPersonal,
+                                completed: true,
+                                fuzzy: false,
+                            });
+                            left -= 1;
+                        }
+                    }
+                });
+            }
+        }
     }
 }
 
@@ -278,6 +487,13 @@ impl SyllableSet {
 
     pub fn len(&self) -> usize {
         self.syllables.len()
+    }
+
+    /// Sorted copy for the completion index.
+    pub fn to_sorted(&self) -> Vec<Box<str>> {
+        let mut v: Vec<Box<str>> = self.syllables.iter().cloned().collect();
+        v.sort_unstable();
+        v
     }
 
     /// Longest-match-first segmentation with backtracking; None when the
@@ -360,6 +576,7 @@ mod tests {
                 text: "随机".into(),
                 pinyin: "sui ji".into(),
                 lm_token: 900,
+                fuzzy: false,
             },
         );
         let mut en = Matcher::default();
@@ -377,6 +594,7 @@ mod tests {
                 text: "TEST".into(),
                 pinyin: "test".into(),
                 lm_token: test_token,
+                fuzzy: false,
             },
         );
         let personal = PersonalMatchers { zh: &zh, en: &en };
