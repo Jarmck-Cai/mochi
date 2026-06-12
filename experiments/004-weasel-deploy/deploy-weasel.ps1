@@ -52,11 +52,15 @@ if ($Restore) {
     New-Item -ItemType Directory -Force $rimeUser | Out-Null
     Copy-Item "$PSScriptRoot\mochi.schema.yaml" $rimeUser -Force
     Copy-Item "$PSScriptRoot\default.custom.yaml" $rimeUser -Force
+    Copy-Item "$PSScriptRoot\weasel.custom.yaml" $rimeUser -Force
     Write-Host "schema deployed to $rimeUser"
 }
 
-# rebuild the rime cache and restart the server
+# rebuild the rime cache and restart the server. Launch via explorer so the
+# server runs at the desktop user's integrity level — Start-Process from this
+# elevated script would leave WeaselServer running elevated (observed: blocks
+# later non-elevated restarts and process inspection).
 & "$weaselDir\WeaselDeployer.exe" /deploy 2>$null
-Start-Process "$weaselDir\WeaselServer.exe"
+explorer.exe "$weaselDir\WeaselServer.exe"
 Write-Host "WeaselServer restarted; remember to start mochi-brain:"
 Write-Host "  $repo\src\brain\target\release\mochi-brain.exe"
