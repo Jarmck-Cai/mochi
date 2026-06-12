@@ -40,8 +40,7 @@
 
 ## 进行中
 
-- **⚠️ rime.dll 部署待 UAC**：局部候选的新 rime.dll 已编好，等管理员确认替换（`experiments\004-weasel-deploy\deploy-weasel.ps1` 提权运行）。部署后把 brain 从 `--no-prefix` 切回正常启动（重启去掉该旗标）。**当前 brain 以 --no-prefix 运行**（新 brain+旧插件窗口期前缀候选会吃掉剩余拼音，安全闸）
-- **M2 正式验收**：真实使用对比微软拼音（协议见 experiments/004 README：20 句混打切换次数 + 整句准确率，建议 ≥3 天）
+- **M2 正式验收**：真实使用对比微软拼音（协议见 experiments/004 README：20 句混打切换次数 + 整句准确率，建议 ≥3 天）。局部候选 rime.dll 已于 2026-06-11 20:35 部署完成，brain 已去 --no-prefix 正常运行——**全功能链路在线，待真实打字验收局部修复与灰色 ghost**
 
 - [x] **第二轮反馈闭环（2026-06-11 下午）**：① 英文连写——连续英文弧切换成本只收一次（en_continue -0.5）+ 相邻英文词自动空格，`timewindow`→"time window"、`deeplearning`→"deep learning"；② **纠正信号检测**——同输入改选 = 纠正：新选择 3 倍加权、被否定事件按记录的精确增量回撤（RecentCommit 存实际计入的 token 句子，免疫短语促升导致的分词漂移），journal 仍存原始事实、回放重新解释（确定性测试过）。"桔子案例"翻回"句子" ✓。42 单测全过
 - [x] **M3 打磨包第一期（2026-06-11 第三轮反馈闭环）**：① **尾部补全弧**（音节/词 key/英文词/个人词四路，惩罚 -2.0）——`congrat`→congratulations、`separ`→separate、`shangxiaw`→上下文、`eeg` 次选 EEGLab（个人补全）；② **模糊音**（z/zh c/ch s/sh in/ing en/eng an/ang，单音节变体，惩罚 -1.5）——`pinying`→拼音；③ **英文底座**：wordfreq top-50k + zipf 频率 λ=0.3 混入 unigram（英文词第一次有彼此排序）。44 单测全过。详见 devlog 2026-06-11-打磨包第一期
