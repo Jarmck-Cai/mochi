@@ -1,11 +1,11 @@
 # 项目状态
 
 > 每个 session 收工时更新本文件。历史细节见 devlog/。
-> 最后更新：2026-06-11（第七次更新：Weasel 部署成功 + 真实使用反馈驱动 essay 底座上线）
+> 最后更新：2026-06-12（第八次更新：ghost 高亮配色根因修复 + Windows 好友试用版 v0.2.0-alpha 发布）
 
 ## 当前阶段
 
-**M2-4 部署完成，真实使用中**（剩：对比微软拼音的正式验收 + brain 自启）
+**M2-4 部署完成 + 好友试用版已发布**（剩：对比微软拼音的正式验收 + 好友反馈收集）
 
 ## 已完成
 
@@ -38,40 +38,32 @@
 
 - [x] **灰色 ghost 点亮 + 局部候选（2026-06-11 深夜）**：① ghost 灰字不可见根因 = aqua 配色未定义 comment 色（机制本身正常），weasel.custom.yaml 补 0x999999 已生效；② **局部候选**——变长前缀候选（每前缀位最优，cap 6，长在前；原始字母切点 + 按键均摊分数门双重防垃圾），Candidate 加 len 字段，插件按 len 设候选跨度，rime 部分选择原生兼容（e2e：选「常用词」→ 剩余继续组字 → 上屏「常用词很重要」）。47 单测全过
 
-## 进行中
-
-- **M2 正式验收**：真实使用对比微软拼音（协议见 experiments/004 README：20 句混打切换次数 + 整句准确率，建议 ≥3 天）。**局部候选已通过用户真实打字验收（2026-06-12，混在完整候选中可用，体验提升）**
-- **灰色 ghost 二次修复待验收（2026-06-12）**：用户复测仍不见灰——根因不在机制（fork 解析/绘制/comment 链路逐环验证全通），而是**高亮态配色**：补全候选几乎总是首选=高亮候选，aqua 高亮是蓝底白字（0xffffff），ghost 配的 0xeeeeee 与白字肉眼不可分。已改半透明白 0x80ffffff（fork 的 _TextOutGhost 走 alpha 通道，蓝底上渲染为褪色浅蓝白），server 已重启。**验收方法：打 `shangxiaw`，首选"上下文"的"文"应呈褪色浅蓝白；非首选补全候选（如"上下五千年"的"五千年"）应呈灰色 0x999999**。注：preedit 行的 ‥ 分界是阶段 0 设计行为，真正的 preedit 内联灰字归 M5（TSF display attributes）
-
 - [x] **第二轮反馈闭环（2026-06-11 下午）**：① 英文连写——连续英文弧切换成本只收一次（en_continue -0.5）+ 相邻英文词自动空格，`timewindow`→"time window"、`deeplearning`→"deep learning"；② **纠正信号检测**——同输入改选 = 纠正：新选择 3 倍加权、被否定事件按记录的精确增量回撤（RecentCommit 存实际计入的 token 句子，免疫短语促升导致的分词漂移），journal 仍存原始事实、回放重新解释（确定性测试过）。"桔子案例"翻回"句子" ✓。42 单测全过
 - [x] **M3 打磨包第一期（2026-06-11 第三轮反馈闭环）**：① **尾部补全弧**（音节/词 key/英文词/个人词四路，惩罚 -2.0）——`congrat`→congratulations、`separ`→separate、`shangxiaw`→上下文、`eeg` 次选 EEGLab（个人补全）；② **模糊音**（z/zh c/ch s/sh in/ing en/eng an/ang，单音节变体，惩罚 -1.5）——`pinying`→拼音；③ **英文底座**：wordfreq top-50k + zipf 频率 λ=0.3 混入 unigram（英文词第一次有彼此排序）。44 单测全过。详见 devlog 2026-06-11-打磨包第一期
 - [x] **第四轮反馈闭环（2026-06-11 晚）**：① **补全可视化**——补全候选 comment 标 `+«补入字母»`（如 自动补全后 `+ou`）、模糊候选标 `~`，Weasel 浅色渲染，解决"不知道打到哪了"的认知错位（真 ghost 内联仍归 M5）；② **放弃输入防污染**——≥6 字母且完整切为 ≥3 拼音音节的 ASCII 上屏视为放弃的原始输入，不学进英文词库（"zidongbuquanhou"曾被学成英文词并参与补全，回放即自愈）。46 单测全过
-- [x] **Ghost 显示推进（2026-06-11 深夜）**：① 阶段 0 完整落地——comment 标记升级到**文字空间**（`自动补全和 ▸和`、`congratulations ▸ulations`，按读音覆盖度逐字判定）+ **preedit 边界标记**（`shang xia w‥en`，输入区/preedit 行显示真实输入边界）；② **阶段 1 候选内灰字已部署**——fork weasel 0.17.4（4 文件 102 行：GHOST 属性 + ▸ comment 解析 + DWrite 区间灰绘），自编 WeaselServer/weasel.dll/weaselx64.dll 已替换安装（原版 .stock 备份），补丁固化 experiments/004/weasel-ghost-0.17.4.patch。**待用户视觉验收灰色渲染**。加载时间挂起项关闭（正常功耗 2150ms < 3s）。供应链升级：现在同时分发 rime.dll + weasel 三件套
+- [x] **Ghost 显示推进（2026-06-11 深夜）**：① 阶段 0 完整落地——comment 标记升级到**文字空间**（`自动补全和 ▸和`、`congratulations ▸ulations`，按读音覆盖度逐字判定）+ **preedit 边界标记**（`shang xia w‥en`，输入区/preedit 行显示真实输入边界）；② **阶段 1 候选内灰字已部署**——fork weasel 0.17.4（4 文件 102 行：GHOST 属性 + ▸ comment 解析 + DWrite 区间灰绘），自编 WeaselServer/weasel.dll/weaselx64.dll 已替换安装（原版 .stock 备份），补丁固化 experiments/004/weasel-ghost-0.17.4.patch。加载时间挂起项关闭（正常功耗 2150ms < 3s）。供应链升级：现在同时分发 rime.dll + weasel 三件套
+- [x] **局部候选用户验收通过（2026-06-12）**：混在完整候选中可用，体验提升（用户真实打字确认）
+- [x] **ghost 灰字"看不到"根因修复（2026-06-12）**：机制全程在工作（fork 解析/绘制/comment 链路逐环验证全通），凶手是**高亮态配色**——补全候选几乎总是首选=高亮候选，aqua 高亮蓝底白字（0xffffff），ghost 的 0xeeeeee 与白字肉眼不可分。已改半透明白 0x80ffffff（_TextOutGhost 走 alpha 通道，蓝底渲染为褪色浅蓝白），纯配置生效。顺手修部署脚本：server 经 explorer 启动免提权继承 + 补分发 weasel.custom.yaml。详见 devlog 2026-06-12-ghost灰字高亮态配色修复
+- [x] **Windows 好友试用版 v0.2.0-alpha 发布（2026-06-12）**：GitHub Release 已发布（https://github.com/Jarmck-Cai/mochi/releases/tag/v0.2.0-alpha ，zip 16MB，SHA256 已附；本地留存 dist\）。发布套件 release/：install.ps1（weasel 三件套+rime.dll 替换、方案部署、**brain 开机自启**经 vbs 隐藏窗口——好友机器重启自愈）、uninstall.ps1（.stock 一键还原，保留个人数据）、测试者 README、package-windows.ps1（个人数据防呆：user_data/personal.tsv/commits.jsonl 永不入包）
 
-- [x] **Windows 好友试用版 v0.2.0-alpha（2026-06-12）**：GitHub Release 已发布
-  （https://github.com/Jarmck-Cai/mochi/releases/tag/v0.2.0-alpha ，zip 16MB，
-  SHA256 已附）。发布套件 release/：install.ps1（weasel 三件套+rime.dll 替换、
-  方案部署、**brain 开机自启**经 vbs 隐藏窗口——好友机器重启自愈）、
-  uninstall.ps1（.stock 一键还原，保留个人数据）、测试者 README、
-  package-windows.ps1（个人数据防呆：user_data/personal.tsv/commits.jsonl
-  永不入包）。**注意：仓库为 private，朋友下载需邀请协作者，或直接发
-  dist\ 下的 zip 文件**
-- **macOS 版本 = 里程碑级移植，无法从现有代码打包**：前端层全部 Windows
-  专属（fork 的是 Weasel；IPC 是 Windows 命名管道；brain 服务端直接调
-  Win32 API；插件合并进 rime.dll 的链路是 MSVC 工艺）。移植需要：fork
-  Squirrel（候选窗灰字同等改造）+ IPC 抽象成 Unix domain socket + brain
-  的 listener 跨平台化 + Mac 硬件上编译签名。建议作为独立里程碑排期
+## 进行中
+
+- **M2 正式验收**：真实使用对比微软拼音（协议见 experiments/004 README：20 句混打切换次数 + 整句准确率，建议 ≥3 天）
+- **ghost 灰字二次修复待用户验收**：打 `shangxiaw`——首选"上下文"的"文"应呈**褪色浅蓝白**（半透明白在蓝底上）；非首选补全候选（如"上下五千年"的"五千年"）应呈**灰色**。若仍无差别，下一步在 fork 加日志取运行时证据（GHOST attr 是否到达绘制层）。注：preedit 行的 ‥ 分界是阶段 0 设计行为不是 bug，真正的 preedit 内联灰字归 M5（TSF display attributes）
+- **好友试用反馈收集**：等待分发方式定案后启动（见待用户决策）
 
 ## 下一步（按优先级）
 
 1. 真实使用观察打磨包体感（补全噪声水平、模糊音误报、50k 词表低频词噪声——必要时按 rank 加先验斜坡）
-2. brain 自动拉起（插件 EnsureConnected 失败时 CreateProcess，或注册开机启动）——已经历一次"重启后 brain 没了"，体验前置项
+2. 开发机 brain 自启对齐 release 方式（试用包已做 HKCU Run + vbs；开发机目前仍手动拉起）；插件 EnsureConnected 失败时 CreateProcess 作为兜底仍值得做
 3. 加载时间正常功耗复测（低功耗态 24.6s/归一化 ≈2s）；超 3s 则上二进制缓存。底座变更前先备份 artifacts 供 A/B（这轮漏了）
 4. 中期：现代大语料重训 trigram（M3 二期，"整句准确率 ≥ 微软拼音"必要条件）；键内 typo 容错（`seperate`/`wn`）归 M4 与置信度同批；ghost 灰色内联归 M5（补全候选 = 其阶段 1）
-5. 管道抢注防护（FIRST_PIPE_INSTANCE + ACL，产品化前）；UIA 补测（M5 前）
+5. 管道抢注防护（FIRST_PIPE_INSTANCE + ACL，产品化前——好友试用机器上 pipe 是默认 ACL，提上日程）；UIA 补测（M5 前）
 
 ## 阻塞 / 待用户决策
 
+- **试用包分发方式**：仓库为 private，朋友打不开 release 链接。选项：①直接发 zip 文件（dist\mochi-windows-x64-v0.2.0-alpha.zip，最简单）②邀请朋友为仓库协作者 ③仓库转 public
+- **macOS 移植是否排期**：无法从现有代码打包——前端层全部 Windows 专属（fork 的是 Weasel；IPC 是命名管道；brain listener 调 Win32 API）。移植 = fork Squirrel + IPC 抽象 Unix socket + brain listener 跨平台 + Mac 硬件编译签名，里程碑级工作量；核心 Rust（解码/个人记忆/打分）可移植
 - 仓库中其他工具生成的 AGENTS.md/.codex/.agents 是否保留（不阻塞）
 
 ## 关键约束备忘
