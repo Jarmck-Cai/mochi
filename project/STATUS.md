@@ -48,6 +48,20 @@
 - [x] **第四轮反馈闭环（2026-06-11 晚）**：① **补全可视化**——补全候选 comment 标 `+«补入字母»`（如 自动补全后 `+ou`）、模糊候选标 `~`，Weasel 浅色渲染，解决"不知道打到哪了"的认知错位（真 ghost 内联仍归 M5）；② **放弃输入防污染**——≥6 字母且完整切为 ≥3 拼音音节的 ASCII 上屏视为放弃的原始输入，不学进英文词库（"zidongbuquanhou"曾被学成英文词并参与补全，回放即自愈）。46 单测全过
 - [x] **Ghost 显示推进（2026-06-11 深夜）**：① 阶段 0 完整落地——comment 标记升级到**文字空间**（`自动补全和 ▸和`、`congratulations ▸ulations`，按读音覆盖度逐字判定）+ **preedit 边界标记**（`shang xia w‥en`，输入区/preedit 行显示真实输入边界）；② **阶段 1 候选内灰字已部署**——fork weasel 0.17.4（4 文件 102 行：GHOST 属性 + ▸ comment 解析 + DWrite 区间灰绘），自编 WeaselServer/weasel.dll/weaselx64.dll 已替换安装（原版 .stock 备份），补丁固化 experiments/004/weasel-ghost-0.17.4.patch。**待用户视觉验收灰色渲染**。加载时间挂起项关闭（正常功耗 2150ms < 3s）。供应链升级：现在同时分发 rime.dll + weasel 三件套
 
+- [x] **Windows 好友试用版 v0.2.0-alpha（2026-06-12）**：GitHub Release 已发布
+  （https://github.com/Jarmck-Cai/mochi/releases/tag/v0.2.0-alpha ，zip 16MB，
+  SHA256 已附）。发布套件 release/：install.ps1（weasel 三件套+rime.dll 替换、
+  方案部署、**brain 开机自启**经 vbs 隐藏窗口——好友机器重启自愈）、
+  uninstall.ps1（.stock 一键还原，保留个人数据）、测试者 README、
+  package-windows.ps1（个人数据防呆：user_data/personal.tsv/commits.jsonl
+  永不入包）。**注意：仓库为 private，朋友下载需邀请协作者，或直接发
+  dist\ 下的 zip 文件**
+- **macOS 版本 = 里程碑级移植，无法从现有代码打包**：前端层全部 Windows
+  专属（fork 的是 Weasel；IPC 是 Windows 命名管道；brain 服务端直接调
+  Win32 API；插件合并进 rime.dll 的链路是 MSVC 工艺）。移植需要：fork
+  Squirrel（候选窗灰字同等改造）+ IPC 抽象成 Unix domain socket + brain
+  的 listener 跨平台化 + Mac 硬件上编译签名。建议作为独立里程碑排期
+
 ## 下一步（按优先级）
 
 1. 真实使用观察打磨包体感（补全噪声水平、模糊音误报、50k 词表低频词噪声——必要时按 rank 加先验斜坡）
