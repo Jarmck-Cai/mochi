@@ -72,6 +72,7 @@ struct Cli {
     user_data: Option<PathBuf>,
     beam_width: usize,
     topn: usize,
+    prefixes: bool,
     bench: bool,
     decode: Vec<String>,
 }
@@ -84,6 +85,7 @@ fn parse_cli() -> Cli {
         // enough for ~3 pages in the IME menu: when the top guess is wrong,
         // the fix should be a page-flip away, not a retype
         topn: 24,
+        prefixes: true,
         bench: false,
         decode: Vec::new(),
     };
@@ -100,6 +102,9 @@ fn parse_cli() -> Cli {
             "--no-user-data" => no_user_data = true,
             "--beam" => cli.beam_width = take("--beam").parse().expect("--beam: number"),
             "--topn" => cli.topn = take("--topn").parse().expect("--topn: number"),
+            // serve a pre-`len` plugin safely: prefix candidates would
+            // commit over the whole segment and eat the rest of the input
+            "--no-prefix" => cli.prefixes = false,
             "--bench" => cli.bench = true,
             "--decode" => {
                 cli.decode.extend(args.by_ref());
@@ -167,6 +172,7 @@ fn main() {
         cli.user_data.as_deref(),
         cli.beam_width,
         cli.topn,
+        cli.prefixes,
     ) {
         Ok(e) => Arc::new(e),
         Err(e) => {

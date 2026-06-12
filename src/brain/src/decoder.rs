@@ -219,6 +219,7 @@ pub fn decode_topn(
     bos: u32,
     beam_width: usize,
     topn: usize,
+    with_prefixes: bool,
 ) -> Vec<DecodeResult> {
     let n = keys.len();
     if n == 0 || !keys.is_ascii() {
@@ -302,8 +303,9 @@ pub fn decode_topn(
     // ("常用词很zh on") pays visibly more per key than the top reading.
     let top_per_key = full.first().map(|f| f.score / n as f64);
     let mut prefixes: Vec<DecodeResult> = Vec::new();
+    let prefix_cap = if with_prefixes { PREFIX_CAP } else { 0 };
     for p in (1..n).rev() {
-        if prefixes.len() >= PREFIX_CAP {
+        if prefixes.len() >= prefix_cap {
             break;
         }
         let best = beams[p]
@@ -410,7 +412,7 @@ mod tests {
     fn top(keys: &str, n: usize) -> Vec<DecodeResult> {
         let arts = mini_artifacts();
         let scorer = Scorer::general_only(&arts.lm, &NO_PERSONAL);
-        decode_topn(keys, &arts.builder, None, &scorer, arts.bos, 12, n)
+        decode_topn(keys, &arts.builder, None, &scorer, arts.bos, 12, n, true)
     }
 
     #[test]

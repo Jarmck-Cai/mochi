@@ -16,6 +16,10 @@ pub struct Engine {
     personal: RwLock<PersonalStore>,
     pub beam_width: usize,
     pub topn: usize,
+    /// Emit prefix candidates (局部候选). Disable when serving a plugin
+    /// build that predates the `len` field — it would commit a prefix
+    /// text over the whole segment and eat the rest of the input.
+    pub prefixes: bool,
 }
 
 impl Engine {
@@ -24,6 +28,7 @@ impl Engine {
         user_data: Option<&Path>,
         beam_width: usize,
         topn: usize,
+        prefixes: bool,
     ) -> Result<Engine, String> {
         let arts = Artifacts::load(dir)?;
         let s = &arts.stats;
@@ -57,6 +62,7 @@ impl Engine {
             personal: RwLock::new(personal),
             beam_width,
             topn,
+            prefixes,
         })
     }
 
@@ -69,6 +75,7 @@ impl Engine {
             personal: RwLock::new(personal),
             beam_width: 12,
             topn: 5,
+            prefixes: true,
         }
     }
 
@@ -86,6 +93,7 @@ impl Engine {
             self.arts.bos,
             self.beam_width,
             self.topn,
+            self.prefixes,
         )
         .into_iter()
         .map(|r| {
