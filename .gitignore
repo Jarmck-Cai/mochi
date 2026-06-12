@@ -40,6 +40,9 @@ experiments/002-uia-probe/*-output.txt
 experiments/003-translator-poc/librime/
 experiments/weasel-fork-probe/
 
+# Release staging (zips uploaded to GitHub Releases, not git)
+dist/
+
 # Local env & editor
 .env
 .vscode/
