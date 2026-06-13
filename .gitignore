@@ -52,3 +52,7 @@ dist/
 # Logs
 logs/
 *.log
+
+# Gate run reports (transient)
+experiments/001-personalization-gain/gate/last-report.*
+experiments/001-personalization-gain/artifacts-*/

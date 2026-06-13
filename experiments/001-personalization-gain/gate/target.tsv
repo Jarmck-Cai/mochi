@@ -1,0 +1,10 @@
+# Mochi general-layer TARGET set: stale picks 相位 2 should fix (hand-maintained).
+# These are cases the CURRENT general LM gets wrong because SIGHAN (2005) is old.
+# Only pure corpus-staleness cases belong here (完成式: 首选错词且非补全/分词噪声).
+# columns: keys<TAB>gold   (keys = raw pinyin letters the user types)
+# 后续自动化：从 project/misfire-log.md 抽（本期手维）。
+#
+# 已剔除：suijitidu（建门禁时实测发现，essay 底座已把"随即→随机"治好，首选已是
+#   "随机梯度下降"；剩余毛病是补全过冲多补"下降"，属 [补全] 噪声非语料过时，
+#   已移至 project/misfire-log.md）。
+dazi	打字
