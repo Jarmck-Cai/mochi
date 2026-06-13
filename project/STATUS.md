@@ -1,11 +1,11 @@
 # 项目状态
 
 > 每个 session 收工时更新本文件。历史细节见 devlog/。
-> 最后更新：2026-06-12（第八次更新：ghost 高亮配色根因修复 + Windows 好友试用版 v0.2.0-alpha 发布）
+> 最后更新：2026-06-12（第九次更新：本机从"只剩源码"全量重建恢复 + 官方 Weasel+fork rime.dll 部署，混打基本盘用户验收通过）
 
 ## 当前阶段
 
-**M2-4 部署完成 + 好友试用版已发布**（剩：对比微软拼音的正式验收 + 好友反馈收集）
+**M2-4 部署完成 + 好友试用版已发布 + 本机重新部署真实使用中**（剩：对比微软拼音的正式验收 + 好友反馈收集）
 
 ## 已完成
 
@@ -46,6 +46,8 @@
 - [x] **ghost 灰字"看不到"根因修复（2026-06-12）**：机制全程在工作（fork 解析/绘制/comment 链路逐环验证全通），凶手是**高亮态配色**——补全候选几乎总是首选=高亮候选，aqua 高亮蓝底白字（0xffffff），ghost 的 0xeeeeee 与白字肉眼不可分。已改半透明白 0x80ffffff（_TextOutGhost 走 alpha 通道，蓝底渲染为褪色浅蓝白），纯配置生效。顺手修部署脚本：server 经 explorer 启动免提权继承 + 补分发 weasel.custom.yaml。详见 devlog 2026-06-12-ghost灰字高亮态配色修复
 - [x] **Windows 好友试用版 v0.2.0-alpha 发布（2026-06-12）**：GitHub Release 已发布（https://github.com/Jarmck-Cai/mochi/releases/tag/v0.2.0-alpha ，zip 16MB，SHA256 已附；本地留存 dist\）。发布套件 release/：install.ps1（weasel 三件套+rime.dll 替换、方案部署、**brain 开机自启**经 vbs 隐藏窗口——好友机器重启自愈）、uninstall.ps1（.stock 一键还原，保留个人数据）、测试者 README、package-windows.ps1（个人数据防呆：user_data/personal.tsv/commits.jsonl 永不入包）
 
+- [x] **本机全量重建恢复 + 重新部署（2026-06-12，第九次更新）**：开发机此前被剥到只剩源码——gitignore 的重产物全失（LM artifacts、SIGHAN 语料、.venv、fork weasel 三件套；用户重装官方 Weasel 覆盖了旧 fork，无 .stock）。① **通用层 artifacts 21s 从零重建**——experiments/001 建 venv（wordfreq/opencc/pyyaml/pypinyin）+ prepare_data 自动下载公共数据（SIGHAN 链接仍活）+ essay.txt 取自官方 Weasel data/ + export_artifacts.py，counts 与基线对齐（dict 372717 / tri 235688 / english 47947，仅 +1 漂移，忠实复现）；② **官方 Weasel + fork rime.dll 模式部署**（用户选：暂不重建 fork 三件套，少"候选内灰字 ghost"视觉，其余全功能）——仿真新用户装到 `%LOCALAPPDATA%\Mochi`，仅 rime.dll 换 fork（官方备份 .stock）；③ **标准用户提权坑**——Jarmck 非管理员，UAC 提权切到管理员 profile 致 per-user 路径写错位，故拆分：per-user 部分以 Jarmck 身份做，**只"停 server+换 rime.dll"用最小化提权脚本**（experiments/004/swap-rimedll.ps1，只碰 Program Files；deploy-local.ps1 含同坑警告头）。实测：整句 `wohuikaishishijishiyong`→"我会开始实际使用"，延迟 57µs–1980µs（亚毫秒），场景信号 windowsterminal.exe，即时学习+commits.jsonl 持久化全工作。**混打基本盘用户验收通过**（这是一个test/你好/deep learning/上下文/拼音 全对）。详见 devlog 2026-06-12-全量重建恢复与本机部署
+
 ## 进行中
 
 - **M2 正式验收**：真实使用对比微软拼音（协议见 experiments/004 README：20 句混打切换次数 + 整句准确率，建议 ≥3 天）
@@ -59,6 +61,8 @@
 3. 加载时间正常功耗复测（低功耗态 24.6s/归一化 ≈2s）；超 3s 则上二进制缓存。底座变更前先备份 artifacts 供 A/B（这轮漏了）
 4. 中期：现代大语料重训 trigram（M3 二期，"整句准确率 ≥ 微软拼音"必要条件）；键内 typo 容错（`seperate`/`wn`）归 M4 与置信度同批；ghost 灰色内联归 M5（补全候选 = 其阶段 1）
 5. 管道抢注防护（FIRST_PIPE_INSTANCE + ACL，产品化前——好友试用机器上 pipe 是默认 ACL，提上日程）；UIA 补测（M5 前）
+6. **重产物备份固化（第九次更新教训）**：artifacts 已证 21s 可重建（脚本+公共数据齐全）；但 **fork weasel 三件套无任何备份、重建要 C++ 工具链**——"装官方覆盖即全失"的脆弱点。建议把 fork 构建产物归档到不入 git 的固定位置。本机当前为官方 Weasel+fork rime.dll，**ghost 候选内灰字暂不渲染（设计内取舍）**，要恢复需重装 fork 三件套
+7. 重启本机一次，验证 brain 开机自启实际生效（HKCU Run / vbs 刚落地，未经重启验证）
 
 ## 阻塞 / 待用户决策
 
