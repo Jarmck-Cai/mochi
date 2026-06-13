@@ -39,6 +39,27 @@
   `keys<TAB>gold`。**只放纯语料过时 case**（补全/分词/模糊音噪声归 misfire-log，别混进来）。
   相位 1 攒够后再做"从 project/misfire-log.md 自动抽"（本期手维）。
 
+## 相位 2 闭环：重训 → 门禁 → 放行
+
+机制已打通并端到端验证（2026-06-13）。给 `export_artifacts.py` 注入现代语料重训，
+再过门禁裁决：
+
+```powershell
+# 1) 重训：把现代语料(同 SIGHAN 分词格式，空格分词)注入 trigram
+.\.venv\Scripts\python.exe export_artifacts.py --out artifacts-cand `
+    --extra-corpus gate\demo-corpus.txt --extra-weight 50
+#   SIGHAN 体量大，少量现代语料需 weight>1 才压得动；meta.json 记 extra_corpus/weight
+
+# 2) 门禁裁决候选能否换上
+.\.venv\Scripts\python.exe gate.py ..\..\artifacts\v0 artifacts-cand
+#   PASS(exit 0) 才把 artifacts-cand 内容覆盖 artifacts/v0
+```
+
+`gate/demo-corpus.txt` 是格式样例 + 闭环自测：8 句含「打字」的现代语料，weight=50
+即把 `dazi` 首选从「大字」翻成「打字」（候选本就存在，排第二），门禁 control 不退、
+target 0/1→1/1 → PASS。**云 LLM 的角色仅是产出更大更好的 `--extra-corpus` 文件**，
+下游全机械化。注：LLM 生成的是原始句，需先分词成空格格式（分词器选型属后续内容问题）。
+
 ## 注意
 
 - 门禁只测**通用层**（始终 `--no-user-data`），个人层泛化另测。

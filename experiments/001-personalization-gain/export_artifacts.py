@@ -137,17 +137,31 @@ def export_dict(
 
 
 # ---------------------------------------------------------------- ngram.tsv
-def train_full_general_lm(data_dir: Path) -> BackoffTrigramLM:
+def train_full_general_lm(
+    data_dir: Path, extra: list[tuple[Path, float]] | None = None
+) -> BackoffTrigramLM:
     """Same recipe as run_experiment.train_general_lm but full corpus:
-    no control holdout, no sentence cap."""
+    no control holdout, no sentence cap.
+
+    `extra` is a list of (pre-segmented corpus file, per-sentence weight) for
+    相位 2 modern-corpus refresh: SIGHAN (2005) is huge, so a small modern
+    corpus needs weight > 1 to actually shift rankings. Same token format as
+    SIGHAN (space-separated words); changes must pass the gate before shipping.
+    """
     lm = BackoffTrigramLM()  # alpha=0.4, matching the experiment
     n = 0
     for name in ("pku_training.utf8", "msr_training.utf8"):
         for sent in iter_general_sentences(data_dir / "general" / name):
             lm.add_sentence(sent)
             n += 1
+    for path, weight in extra or []:
+        m = 0
+        for sent in iter_general_sentences(path):
+            lm.add_sentence(sent, weight=weight)
+            m += 1
+        log(f"extra corpus {Path(path).name}: +{m:,} sentences (weight={weight})")
     lm.finalize(min_bigram=0.0, min_trigram=1.0)  # drop singleton trigrams
-    log(f"general LM trained on {n:,} sentences: {lm.stats()}")
+    log(f"general LM trained on {n:,} base sentences: {lm.stats()}")
     return lm
 
 
@@ -253,6 +267,19 @@ def main() -> None:
         default=0.3,
         help="english-frequency share of unigram mass (typing is mostly Chinese)",
     )
+    ap.add_argument(
+        "--extra-corpus",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="extra pre-segmented corpus (相位 2 modern refresh); repeatable",
+    )
+    ap.add_argument(
+        "--extra-weight",
+        type=float,
+        default=1.0,
+        help="per-sentence weight for --extra-corpus (SIGHAN is large; use >1 to shift)",
+    )
     args = ap.parse_args()
 
     data_dir = ROOT / "data"
@@ -266,9 +293,14 @@ def main() -> None:
     elif args.essay:
         log(f"WARNING: essay file not found at {args.essay}; building without it")
 
+    extra = [(Path(p), args.extra_weight) for p in args.extra_corpus]
+    for p, _ in extra:
+        if not p.is_file():
+            sys.exit(f"--extra-corpus not found: {p}")
+
     n_dict, n_essay_words = export_dict(data_dir, out_dir / "dict.tsv", essay)
     n_english, english_freqs = export_english(out_dir / "english.tsv")
-    lm = train_full_general_lm(data_dir)
+    lm = train_full_general_lm(data_dir, extra)
     base_total = lm.total
     added = 0.0
     if essay:
@@ -295,6 +327,8 @@ def main() -> None:
             "min_trigram": 1.0,
             **({"essay_lambda": args.essay_lambda} if essay else {}),
             "english_lambda": args.english_lambda,
+            **({"extra_corpus": [Path(p).name for p in args.extra_corpus],
+                "extra_weight": args.extra_weight} if args.extra_corpus else {}),
         },
         "counts": {
             "dict": n_dict,
