@@ -486,4 +486,53 @@ a\t4
         let bad = "# no headers here\n1\tx\t1\n";
         assert!(Artifacts::from_strs(MINI_DICT, bad, MINI_ENGLISH).is_err());
     }
+
+    #[test]
+    fn malformed_ngram_rows_report_file_and_actual_line() {
+        let mut failures = Vec::new();
+        for (order, valid) in [("1", "hello"), ("2", "<s> hello"), ("3", "<s> hello world")] {
+            let mut rows = vec![
+                format!("{order}\t\t1"),
+                format!("{order}\t{valid} extra\t1"),
+                format!("{order}\t {valid}\t1"),
+                format!("{order}\t{valid} \t1"),
+                format!("{order}\t{valid}\t1\textra"),
+                format!("{order}\t{valid}\t1\t"),
+                format!("{order}\t{valid}"),
+            ];
+            if order != "1" {
+                rows.push(format!("{order}\thello\t1"));
+                rows.push(format!("{order}\t{}\t1", valid.replace(' ', "  ")));
+            }
+            if order == "3" {
+                rows.push("3\t<s> hello\t1".into());
+                rows.push("3\t<s>  world\t1".into());
+            }
+            for row in rows {
+                // Comments, a blank line, and a valid row precede the bad row.
+                let text = format!(
+                    "# total_tokens=100\n# backoff=stupid:0.4\n\n# fixture\n1\thello\t2\n{row}\n"
+                );
+                match Artifacts::from_strs(MINI_DICT, &text, MINI_ENGLISH) {
+                    Ok(_) => failures.push(format!("accepted malformed row: {row:?}")),
+                    Err(error) => {
+                        if !error.contains("ngram.tsv line 6:") {
+                            failures.push(format!("wrong location for {row:?}: {error}"));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn valid_ngram_orders_and_bos_continue_loading() {
+        let text = "# total_tokens=100\n# backoff=stupid:0.4\n\n\
+                    1\thello\t2.5\n1\t<s>\t1\n\
+                    2\t<s> hello\t1.5\n3\t<s> <s> hello\t0.5\n";
+        let artifacts = Artifacts::from_strs(MINI_DICT, text, MINI_ENGLISH)
+            .expect("valid orders, fractional counts, and <s> must load");
+        assert_eq!(artifacts.stats.ngrams, (2, 1, 1));
+    }
 }
