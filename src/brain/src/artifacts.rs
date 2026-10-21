@@ -370,11 +370,15 @@ fn parse_dict(text: &str, interner: &mut Interner) -> Result<DictTables, String>
 fn parse_english(text: &str, interner: &mut Interner) -> Result<(Matcher, usize), String> {
     let mut m = Matcher::default();
     let mut n = 0usize;
-    for line in text.lines() {
+    for (no, line) in text.lines().enumerate() {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let word = line.split('\t').next().unwrap_or("");
+        let mut cols = line.split('\t');
+        let word = match (cols.next(), cols.next(), cols.next()) {
+            (Some(word), Some(_rank), None) => word,
+            _ => return Err(format!("english.tsv line {}: bad column count", no + 1)),
+        };
         let lower = word.to_ascii_lowercase();
         if lower.len() < 2 || !lower.bytes().all(|b| b.is_ascii_lowercase()) {
             continue;
