@@ -398,6 +398,52 @@ fn parse_english(text: &str, interner: &mut Interner) -> Result<(Matcher, usize)
 pub(crate) mod tests {
     use super::*;
 
+    #[test]
+    fn english_missing_rank_is_rejected() {
+        assert!(Artifacts::from_strs(MINI_DICT, MINI_NGRAM, "test").is_err());
+    }
+
+    #[test]
+    fn english_extra_column_is_rejected() {
+        assert!(Artifacts::from_strs(MINI_DICT, MINI_NGRAM, "test\t1\textra").is_err());
+    }
+
+    #[test]
+    fn english_empty_trailing_column_is_rejected() {
+        assert!(Artifacts::from_strs(MINI_DICT, MINI_NGRAM, "test\t1\t").is_err());
+    }
+
+    #[test]
+    fn english_bad_column_count_reports_actual_line() {
+        for row in ["test", "test\t1\textra", "test\t1\t", "a", "123\t1\textra"] {
+            let english = format!("# fixture\n\nValid\t1\n# comment\n\n{row}\n");
+            match Artifacts::from_strs(MINI_DICT, MINI_NGRAM, &english) {
+                Ok(_) => panic!("accepted malformed english.tsv line 6: {row:?}"),
+                Err(error) => assert!(
+                    error.contains("english.tsv line 6:"),
+                    "wrong location for {row:?}: {error}"
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn english_two_columns_preserve_casing_filtering_and_unused_rank() {
+        for rank in ["1", "invalid", "-2.5", ""] {
+            let english = format!(
+                "# word<TAB>rank\n\nTeSt\t{rank}\na\t1\nabc123\t2\nnon-ascii\t3\n\n# end\n"
+            );
+            let artifacts = Artifacts::from_strs(MINI_DICT, MINI_NGRAM, &english)
+                .unwrap_or_else(|error| panic!("valid two columns with rank {rank:?}: {error}"));
+            assert_eq!(artifacts.stats.english_words, 1);
+            let entries = artifacts.builder.en_matcher.get("test").expect("lowercase key");
+            assert_eq!(entries[0].text.as_ref(), "TeSt");
+            for filtered in ["a", "abc123", "non-ascii"] {
+                assert!(artifacts.builder.en_matcher.get(filtered).is_none());
+            }
+        }
+    }
+
     fn assert_dict_bad_column_count(row: &str) {
         // Count comments, blank lines, and valid data in the physical line number.
         let dict = format!("# fixture\n\nni\t你\t3\n# another comment\n\n{row}\n");
