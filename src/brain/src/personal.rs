@@ -666,7 +666,7 @@ impl PersonalStore {
             .map(|(s, _)| s.clone());
         let best = match best {
             Some(s) => s,
-            None => return,
+            None => lower.into(),
         };
         if self.en_added.contains(&tok) {
             if self.en_surface.get(&tok) != Some(&best) {
