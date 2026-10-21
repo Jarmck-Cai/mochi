@@ -154,13 +154,38 @@ fn parse_ngram(text: &str, interner: &mut Interner) -> Result<BackoffTrigramLm, 
             continue;
         }
         let mut cols = line.split('\t');
-        let (order, tokens, count) = match (cols.next(), cols.next(), cols.next()) {
-            (Some(o), Some(t), Some(c)) => (o, t, c),
+        let (order, tokens, count) = match (cols.next(), cols.next(), cols.next(), cols.next()) {
+            (Some(o), Some(t), Some(c), None) => (o, t, c),
             _ => return Err(format!("ngram.tsv line {}: bad column count", no + 1)),
         };
         let count: f32 = count
             .parse()
             .map_err(|_| format!("ngram.tsv line {}: bad count '{}'", no + 1, count))?;
+        let expected = match order {
+            "1" => 1,
+            "2" => 2,
+            "3" => 3,
+            other => return Err(format!("ngram.tsv line {}: bad order '{}'", no + 1, other)),
+        };
+        // Keep empty fields: trimming or split_whitespace would hide malformed separators.
+        let mut token_count = 0;
+        for token in tokens.split(' ') {
+            token_count += 1;
+            if token.is_empty() || token_count > expected {
+                return Err(format!(
+                    "ngram.tsv line {}: bad tokens for order {}",
+                    no + 1,
+                    order
+                ));
+            }
+        }
+        if token_count != expected {
+            return Err(format!(
+                "ngram.tsv line {}: bad tokens for order {}",
+                no + 1,
+                order
+            ));
+        }
         let mut toks = tokens.split(' ');
         match order {
             "1" => {
