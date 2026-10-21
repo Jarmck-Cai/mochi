@@ -138,7 +138,7 @@ impl Artifacts {
 fn parse_ngram(text: &str, interner: &mut Interner) -> Result<BackoffTrigramLm, String> {
     let mut alpha: Option<f64> = None;
     let mut total: Option<f64> = None;
-    for line in text.lines().take_while(|l| l.starts_with('#')) {
+    for line in text.lines().take_while(|l| l.is_empty() || l.starts_with('#')) {
         if let Some(v) = line.split("total_tokens=").nth(1) {
             total = v.trim().parse().ok();
         }
