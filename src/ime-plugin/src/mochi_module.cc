@@ -9,8 +9,10 @@
 #include <rime/registry.h>
 
 #include "mochi_translator.h"
+#include "brain_client.h"
 
 static void rime_mochi_initialize() {
+  mochi::StartBrainLauncher();
   LOG(INFO) << "[mochi] registering components from module 'mochi'.";
   std::fprintf(stderr, "[mochi] module 'mochi' initialized\n");
   rime::Registry& r = rime::Registry::instance();
@@ -18,6 +20,8 @@ static void rime_mochi_initialize() {
              new rime::Component<mochi::MochiTranslator>);
 }
 
-static void rime_mochi_finalize() {}
+static void rime_mochi_finalize() {
+  mochi::StopBrainLauncher();
+}
 
 RIME_REGISTER_MODULE(mochi)

@@ -20,7 +20,133 @@ ULONGLONG NowUs() {
   QueryPerformanceCounter(&c);
   return static_cast<ULONGLONG>(c.QuadPart) * 1000000ULL / freq;
 }
+
+// Lifecycle calls are serialized separately so joining never holds the state
+// lock. Keys only try the state lock; they never wait for the worker.
+SRWLOCK launcher_lifecycle = SRWLOCK_INIT;
+SRWLOCK launcher_lock = SRWLOCK_INIT;
+HANDLE launcher_event = nullptr;
+HANDLE launcher_thread = nullptr;
+bool launcher_accepting = false;
+bool launcher_pending = false;  // Includes a launch currently in progress.
+ULONGLONG launcher_retry_after_us = 0;
+
+void LaunchBrain() {
+  const DWORD size = GetEnvironmentVariableW(L"LOCALAPPDATA", nullptr, 0);
+  if (!size)
+    return;
+  std::vector<wchar_t> buffer(size);
+  const DWORD length = GetEnvironmentVariableW(L"LOCALAPPDATA", buffer.data(), size);
+  if (!length || length >= size)
+    return;
+  std::wstring root(buffer.data(), length);
+  // Require a fully qualified local path; never resolve a relative executable
+  // against the host's working directory or search PATH.
+  if (root.size() < 3 ||
+      !((root[0] >= L'A' && root[0] <= L'Z') ||
+        (root[0] >= L'a' && root[0] <= L'z')) ||
+      root[1] != L':' || (root[2] != L'\\' && root[2] != L'/') ||
+      root.find(L'"') != std::wstring::npos)
+    return;
+  while (root.size() > 3 && (root.back() == L'\\' || root.back() == L'/'))
+    root.pop_back();
+  root += L"\\Mochi";
+  const std::wstring application = root + L"\\bin\\mochi-brain.exe";
+  const std::wstring command = L"\"" + application + L"\" --artifacts \"" +
+      root + L"\\artifacts\\v0\" --user-data \"" + root + L"\\user_data\"";
+  std::vector<wchar_t> mutable_command(command.begin(), command.end());
+  mutable_command.push_back(L'\0');
+  STARTUPINFOW startup{};
+  startup.cb = sizeof(startup);
+  startup.dwFlags = STARTF_USESHOWWINDOW;
+  startup.wShowWindow = SW_HIDE;
+  PROCESS_INFORMATION process{};
+  CreateProcessW(application.c_str(), mutable_command.data(), nullptr, nullptr,
+                 FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &process);
+  // No wait for Brain startup or exit, and no owned handles escape this call.
+  if (process.hThread)
+    CloseHandle(process.hThread);
+  if (process.hProcess)
+    CloseHandle(process.hProcess);
+}
+
+DWORD WINAPI BrainLauncherWorker(void*) {
+  for (;;) {
+    if (WaitForSingleObject(launcher_event, INFINITE) != WAIT_OBJECT_0)
+      return 0;
+    AcquireSRWLockExclusive(&launcher_lock);
+    const bool stopping = !launcher_accepting;
+    const bool pending = launcher_pending;
+    ReleaseSRWLockExclusive(&launcher_lock);
+    if (stopping)
+      return 0;
+    if (pending) {
+      try {
+        LaunchBrain();
+      } catch (...) {
+        // Allocation failure degrades exactly like a failed process launch.
+      }
+      AcquireSRWLockExclusive(&launcher_lock);
+      launcher_pending = false;
+      ReleaseSRWLockExclusive(&launcher_lock);
+    }
+  }
+}
+
+void RequestBrainLaunch() {
+  if (!TryAcquireSRWLockExclusive(&launcher_lock))
+    return;
+  const ULONGLONG now = NowUs();
+  if (launcher_accepting && !launcher_pending && now >= launcher_retry_after_us) {
+    launcher_pending = true;
+    launcher_retry_after_us = now + BrainClient::kBackoffMs * 1000ULL;
+    SetEvent(launcher_event);
+  }
+  ReleaseSRWLockExclusive(&launcher_lock);
+}
 }  // namespace
+
+void StartBrainLauncher() {
+  AcquireSRWLockExclusive(&launcher_lifecycle);
+  AcquireSRWLockExclusive(&launcher_lock);
+  if (!launcher_thread) {
+    launcher_event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (launcher_event) {
+      launcher_pending = false;
+      launcher_accepting = true;
+      launcher_thread = CreateThread(nullptr, 0, BrainLauncherWorker, nullptr, 0, nullptr);
+      if (!launcher_thread) {
+        launcher_accepting = false;
+        CloseHandle(launcher_event);
+        launcher_event = nullptr;
+      }
+    }
+  }
+  ReleaseSRWLockExclusive(&launcher_lock);
+  ReleaseSRWLockExclusive(&launcher_lifecycle);
+}
+
+void StopBrainLauncher() {
+  AcquireSRWLockExclusive(&launcher_lifecycle);
+  AcquireSRWLockExclusive(&launcher_lock);
+  launcher_accepting = false;
+  if (launcher_event)
+    SetEvent(launcher_event);
+  ReleaseSRWLockExclusive(&launcher_lock);
+  if (launcher_thread) {
+    WaitForSingleObject(launcher_thread, INFINITE);
+    CloseHandle(launcher_thread);
+    launcher_thread = nullptr;
+  }
+  AcquireSRWLockExclusive(&launcher_lock);
+  if (launcher_event) {
+    CloseHandle(launcher_event);
+    launcher_event = nullptr;
+  }
+  launcher_pending = false;
+  ReleaseSRWLockExclusive(&launcher_lock);
+  ReleaseSRWLockExclusive(&launcher_lifecycle);
+}
 
 BrainClient::BrainClient() : read_buf_(kMaxMessage) {
   // Manual-reset so GetOverlappedResult/WaitForSingleObject semantics stay
@@ -47,7 +173,10 @@ bool BrainClient::EnsureConnected() {
                          /*dwShareMode=*/0, nullptr, OPEN_EXISTING,
                          FILE_FLAG_OVERLAPPED, nullptr);
   if (h == INVALID_HANDLE_VALUE) {
+    const DWORD error = GetLastError();
     ArmBackoff();
+    if (error == ERROR_FILE_NOT_FOUND)
+      RequestBrainLaunch();
     return false;
   }
   DWORD mode = PIPE_READMODE_MESSAGE;

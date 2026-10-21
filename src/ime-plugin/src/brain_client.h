@@ -24,6 +24,10 @@
 
 namespace mochi {
 
+// Module-owned worker: start before serving keys; stop and join outside keys.
+void StartBrainLauncher();
+void StopBrainLauncher();
+
 class BrainClient {
  public:
   static constexpr DWORD kBudgetMs = 15;        // ipc-v0 hard budget
