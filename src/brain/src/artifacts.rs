@@ -284,8 +284,8 @@ fn parse_dict(text: &str, interner: &mut Interner) -> Result<DictTables, String>
             continue;
         }
         let mut cols = line.split('\t');
-        let (key, word, weight) = match (cols.next(), cols.next(), cols.next()) {
-            (Some(k), Some(w), Some(c)) => (k, w, c),
+        let (key, word, weight) = match (cols.next(), cols.next(), cols.next(), cols.next()) {
+            (Some(k), Some(w), Some(c), None) => (k, w, c),
             _ => return Err(format!("dict.tsv line {}: bad column count", no + 1)),
         };
         let weight: i64 = weight.parse::<f64>().map(|f| f as i64).unwrap_or(0);
