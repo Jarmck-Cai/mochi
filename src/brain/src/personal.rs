@@ -865,6 +865,72 @@ mod tests {
     use crate::artifacts::tests::mini_artifacts;
 
     #[test]
+    fn import_tsv_rejects_malformed_ngram_tokens_and_columns() {
+        let arts = mini_artifacts();
+        let mut failures = Vec::new();
+        for (kind, valid) in [("1", "hello"), ("2", "<s> hello"), ("3", "<s> hello world")] {
+            let mut rows = vec![
+                format!("{kind}\t\t1.5"),
+                format!("{kind}\t{valid} extra\t1.5"),
+                format!("{kind}\t {valid}\t1.5"),
+                format!("{kind}\t{valid} \t1.5"),
+                format!("{kind}\t{valid}\t1.5\textra"),
+                format!("{kind}\t{valid}\t1.5\t"),
+                format!("{kind}\t{valid}"),
+            ];
+            if kind != "1" {
+                rows.push(format!("{kind}\thello\t1.5"));
+                rows.push(format!("{kind}\t{}\t1.5", valid.replace(' ', "  ")));
+            }
+            if kind == "3" {
+                rows.push("3\t<s> hello\t1.5".into());
+                rows.push("3\t<s>  world\t1.5".into());
+            }
+            for row in rows {
+                let mut store = PersonalStore::new(&arts);
+                let text = format!("# synthetic personal fixture\n\n1\thello\t2.5\n# comment\n{row}\n");
+                let result = store.import_tsv(&arts, &text);
+                if !result.is_err() {
+                    failures.push(format!("accepted malformed row: {row:?}"));
+                } else if !result.unwrap_err().contains("personal.tsv line 5:") {
+                    failures.push(format!("wrong error location for {row:?}"));
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn import_tsv_requires_exactly_three_columns_for_every_kind() {
+        let arts = mini_artifacts();
+        let mut failures = Vec::new();
+        for row in ["lex\thello\t2.5", "case\thello\tHello", "zhword\t你好你\tni hao ni"] {
+            for suffix in ["\textra", "\t"] {
+                let mut store = PersonalStore::new(&arts);
+                let text = format!("# synthetic fixture\n\n{row}{suffix}\n");
+                match store.import_tsv(&arts, &text) {
+                    Ok(_) => failures.push(format!("accepted extra column: {row:?}{suffix:?}")),
+                    Err(error) => assert!(error.contains("personal.tsv line 3:"), "{error}"),
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn import_tsv_preserves_bos_and_fractional_ngram_counts() {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        let text = "# synthetic fixture\n\n1\t<s>\t0.5\n1\thello\t2.25\n2\t<s> hello\t1.75\n3\t<s> <s> hello\t0.125\n";
+        assert_eq!(store.import_tsv(&arts, text).unwrap(), 4);
+        let hello = store.token(&arts, "hello");
+        assert_eq!(store.global.uni.get(&arts.bos), Some(&0.5));
+        assert_eq!(store.global.uni.get(&hello), Some(&2.25));
+        assert_eq!(store.global.total, 2.75);
+        assert!(!store.ext_map.contains_key(""));
+    }
+
+    #[test]
     fn personal_lm_matches_python_backoff_ladder() {
         // mirror lm.rs mini test semantics with weighted counts
         let (a, b, x, d) = (0u32, 1u32, 2u32, 3u32);
