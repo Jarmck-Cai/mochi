@@ -709,11 +709,13 @@ impl PersonalStore {
             match kind {
                 "lex" => {
                     let count: f64 = b.parse().map_err(|_| badnum(b))?;
-                    let tok = self.token(arts, a);
                     if a.is_ascii() {
+                        let lower = a.to_ascii_lowercase();
+                        let tok = self.token(arts, &lower);
                         *self.lex_en.entry(tok).or_insert(0.0) += count;
-                        en_words.push((tok, a.to_string()));
+                        en_words.push((tok, lower));
                     } else {
+                        let tok = self.token(arts, a);
                         *self.lex_zh.entry(tok).or_insert(0.0) += count;
                     }
                 }
