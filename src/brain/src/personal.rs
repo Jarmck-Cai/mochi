@@ -473,6 +473,10 @@ impl PersonalStore {
                 }
                 Unit::Ascii(surface) => {
                     let lower = surface.to_ascii_lowercase();
+                    if !(2..=20).contains(&lower.len()) {
+                        i += 1;
+                        continue;
+                    }
                     // A long ASCII run that segments cleanly into pinyin is
                     // almost surely ABANDONED INPUT committed raw (the user
                     // lost their place mid-composition), not an English
@@ -483,7 +487,7 @@ impl PersonalStore {
                             .syllables
                             .segment(&lower)
                             .is_some_and(|segs| segs.len() >= 3);
-                    if (2..=20).contains(&lower.len()) && !abandoned_pinyin {
+                    if !abandoned_pinyin {
                         let tok = self.token(arts, &lower);
                         current.push(tok);
                         *self.lex_en.entry(tok).or_insert(0.0) += weight;
