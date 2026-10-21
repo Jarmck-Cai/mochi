@@ -880,6 +880,88 @@ mod tests {
     use super::*;
     use crate::artifacts::tests::mini_artifacts;
 
+    fn ambiguous_pinyin_artifacts() -> Artifacts {
+        Artifacts::from_strs(
+            "xi\t西\t10\nan\t安\t10\nxian\t先\t10\n",
+            "# total_tokens=100\n# backoff=stupid:0.4\n1\t西\t10\n1\t安\t10\n1\t先\t10\n",
+            "hello\t1\n",
+        ).expect("synthetic artifacts parse")
+    }
+
+    #[test]
+    fn excluded_long_english_commit_finishes_within_guard_window() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let arts = ambiguous_pinyin_artifacts();
+            let mut store = PersonalStore::new(&arts);
+            let text = format!("{}q", "xian".repeat(24));
+            assert_eq!(text.len(), 97);
+            store.commit(&arts, &text, Some(&text), None);
+            let mut arcs = 0;
+            store.view(None).matchers().en.for_matches(&text, 0, |_, entries| {
+                arcs += entries.len();
+            });
+            tx.send((store.n_events, store.lex_en.len(), store.en_added.len(), arcs))
+                .expect("test receiver remains available");
+        });
+        // This is a test guard, not a product latency or word-length threshold.
+        let result = rx.recv_timeout(std::time::Duration::from_secs(1));
+        assert!(result.is_ok(), "excluded 97-letter run must finish commit within the one-second test guard: {result:?}");
+        assert_eq!(result.unwrap(), (1, 0, 0, 0),
+            "commit must count the event without learning an English word or arc");
+        worker.join().expect("commit worker succeeds");
+    }
+
+    #[test]
+    fn english_length_gate_preserves_learning_boundaries() {
+        let arts = ambiguous_pinyin_artifacts();
+        for text in ["qq", "github", "abcdefghijklmnopqrst"] {
+            let mut store = PersonalStore::new(&arts);
+            for _ in 0..2 {
+                store.commit(&arts, text, Some(text), None);
+            }
+            let tok = store.ext_map.get(text).copied().expect("English token learned");
+            assert_eq!(store.n_events, 2);
+            assert_eq!(store.lex_en.get(&tok), Some(&2.0));
+            assert_eq!(store.global.uni.get(&tok), Some(&2.0));
+            let mut found = false;
+            store.view(None).matchers().en.for_matches(text, 0, |end, entries| {
+                found |= end == text.len() && entries.iter().any(|e| e.lm_token == tok);
+            });
+            assert!(found, "learnable English must retain its full word arc: {text}");
+        }
+        for text in ["q", "abcdefghijklmnopqrstu"] {
+            let mut store = PersonalStore::new(&arts);
+            store.commit(&arts, text, Some(text), None);
+            assert_eq!(store.n_events, 1);
+            assert!(store.lex_en.is_empty());
+            assert!(store.en_added.is_empty());
+        }
+    }
+
+    #[test]
+    fn english_length_gate_preserves_abandoned_pinyin_and_mixed_text() {
+        let arts = ambiguous_pinyin_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        for _ in 0..2 {
+            store.commit(&arts, "xianxianxian", Some("xianxianxian"), None);
+        }
+        assert_eq!(store.n_events, 2);
+        assert!(store.lex_en.is_empty());
+        assert!(store.en_added.is_empty());
+        for _ in 0..2 {
+            store.commit(&arts, "先GitHub！安", Some("xiangithuban"), None);
+        }
+        assert_eq!(store.n_events, 4);
+        let tok = store.ext_map.get("github").copied().expect("mixed English learned");
+        assert_eq!(store.lex_en.get(&tok), Some(&2.0));
+        assert_eq!(store.global.uni.get(&tok), Some(&2.0));
+        assert_eq!(store.en_surface.get(&tok).map(|s| &**s), Some("GitHub"));
+        for word in ["先", "安"] {
+            assert_eq!(store.global.uni.get(&arts.interner.get(word).unwrap()), Some(&2.0));
+        }
+    }
+
     #[test]
     fn import_tsv_uppercase_lex_matches_lowercase_keys() {
         let arts = mini_artifacts();
