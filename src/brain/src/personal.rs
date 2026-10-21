@@ -701,8 +701,8 @@ impl PersonalStore {
                 continue;
             }
             let mut cols = line.split('\t');
-            let (kind, a, b) = match (cols.next(), cols.next(), cols.next()) {
-                (Some(k), Some(a), Some(b)) => (k, a, b),
+            let (kind, a, b) = match (cols.next(), cols.next(), cols.next(), cols.next()) {
+                (Some(k), Some(a), Some(b), None) => (k, a, b),
                 _ => return Err(format!("personal.tsv line {}: bad column count", no + 1)),
             };
             let badnum = |v: &str| format!("personal.tsv line {}: bad count '{}'", no + 1, v);
@@ -733,7 +733,20 @@ impl PersonalStore {
                 }
                 "1" | "2" | "3" => {
                     let count: f64 = b.parse().map_err(|_| badnum(b))?;
-                    let mut toks = a.split(' ').map(|s| self.token(arts, s));
+                    // Validate the whole field before interning any token.
+                    let words: Vec<&str> = a.split(' ').collect();
+                    let order = match kind {
+                        "1" => 1,
+                        "2" => 2,
+                        _ => 3,
+                    };
+                    if words.len() != order || words.iter().any(|word| word.is_empty()) {
+                        return Err(format!(
+                            "personal.tsv line {}: expected {} non-empty tokens separated by single ASCII spaces",
+                            no + 1, order
+                        ));
+                    }
+                    let mut toks = words.into_iter().map(|s| self.token(arts, s));
                     match kind {
                         "1" => {
                             let w = toks.next().ok_or_else(|| badnum(a))?;
@@ -895,6 +908,7 @@ mod tests {
                 } else if !result.unwrap_err().contains("personal.tsv line 5:") {
                     failures.push(format!("wrong error location for {row:?}"));
                 }
+                assert!(!store.ext_map.contains_key(""), "empty token registered: {row:?}");
             }
         }
         assert!(failures.is_empty(), "{}", failures.join("\n"));
@@ -926,6 +940,11 @@ mod tests {
         let hello = store.token(&arts, "hello");
         assert_eq!(store.global.uni.get(&arts.bos), Some(&0.5));
         assert_eq!(store.global.uni.get(&hello), Some(&2.25));
+        assert_eq!(store.global.bi.get(&bi_key(arts.bos, hello)), Some(&1.75));
+        assert_eq!(
+            store.global.tri.get(&tri_key(arts.bos, arts.bos, hello)),
+            Some(&0.125)
+        );
         assert_eq!(store.global.total, 2.75);
         assert!(!store.ext_map.contains_key(""));
     }
