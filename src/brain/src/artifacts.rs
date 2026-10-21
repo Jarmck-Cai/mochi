@@ -398,6 +398,48 @@ fn parse_english(text: &str, interner: &mut Interner) -> Result<(Matcher, usize)
 pub(crate) mod tests {
     use super::*;
 
+    fn assert_dict_bad_column_count(row: &str) {
+        // Count comments, blank lines, and valid data in the physical line number.
+        let dict = format!("# fixture\n\nni\t你\t3\n# another comment\n\n{row}\n");
+        match Artifacts::from_strs(&dict, MINI_NGRAM, MINI_ENGLISH) {
+            Ok(_) => panic!("accepted malformed dict.tsv line 6: {row:?}"),
+            Err(error) => assert!(
+                error.contains("dict.tsv line 6: bad column count"),
+                "wrong error for {row:?}: {error}"
+            ),
+        }
+    }
+
+    #[test]
+    fn dict_missing_columns_report_actual_line() {
+        for row in ["ni", "ni\t你"] {
+            assert_dict_bad_column_count(row);
+        }
+    }
+
+    #[test]
+    fn dict_extra_columns_report_actual_line() {
+        for row in ["ni\t你\t3\textra", "ni\t你\t3\textra\tmore"] {
+            assert_dict_bad_column_count(row);
+        }
+    }
+
+    #[test]
+    fn dict_empty_trailing_fourth_column_reports_actual_line() {
+        assert_dict_bad_column_count("ni\t你\t3\t");
+    }
+
+    #[test]
+    fn dict_three_columns_preserve_comments_blanks_and_weight_parsing() {
+        for weight in ["3", "2.5", "-1.5", "NaN", "inf", "invalid", ""] {
+            let dict = format!("# fixture\n\nni hao\t你好\t{weight}\n\n# end\n");
+            let artifacts = Artifacts::from_strs(&dict, MINI_NGRAM, MINI_ENGLISH)
+                .unwrap_or_else(|error| panic!("three columns with weight {weight:?}: {error}"));
+            assert_eq!(artifacts.stats.dict_entries, 1);
+            assert!(artifacts.syllables.segment("nihao").is_some());
+        }
+    }
+
     const MINI_DICT: &str = "\
 # key<TAB>text<TAB>weight
 ni hao\t你好\t5000
