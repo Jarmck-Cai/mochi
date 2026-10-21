@@ -879,6 +879,70 @@ mod tests {
     use crate::artifacts::tests::mini_artifacts;
 
     #[test]
+    fn import_tsv_uppercase_lex_matches_lowercase_keys() {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        assert_eq!(store.import_tsv(&arts, "lex\tHFO\t12.5\n").unwrap(), 1);
+
+        let mut arcs = Vec::new();
+        store.view(None).matchers().en.for_matches("hfo", 0, |end, entries| {
+            if end == 3 {
+                arcs.extend(entries.iter().map(|entry| entry.lm_token));
+            }
+        });
+        assert!(!arcs.is_empty(), "uppercase lex HFO must create an English arc for lowercase hfo ending at 3");
+        let token = store.ext_map.get("hfo").copied().expect("lowercase token interned");
+        assert!(arcs.iter().all(|&id| id == token));
+        assert_eq!(store.lex_en.get(&token), Some(&12.5));
+        assert!(!store.ext_map.contains_key("HFO"));
+    }
+
+    #[test]
+    fn import_tsv_uppercase_lex_shares_case_preference_token() {
+        let arts = mini_artifacts();
+        // Both row orders must resolve lex counts and casing to the same token.
+        for tsv in ["lex\tHFO\t12.5\ncase\thfo\tHFO\n", "case\thfo\tHFO\nlex\tHFO\t12.5\n"] {
+            let mut store = PersonalStore::new(&arts);
+            assert_eq!(store.import_tsv(&arts, tsv).unwrap(), 2);
+            let token = store.ext_map.get("hfo").copied().expect("lowercase token interned");
+            assert_eq!(store.lex_en.get(&token), Some(&12.5), "lex and case must share lowercase token");
+            assert!(!store.ext_map.contains_key("HFO"));
+            let mut arcs = Vec::new();
+            store.view(None).matchers().en.for_matches("hfo", 0, |end, entries| {
+                if end == 3 {
+                    arcs.extend(entries.iter().map(|entry| (entry.lm_token, entry.text.to_string())));
+                }
+            });
+            assert_eq!(arcs, vec![(token, "HFO".to_string())]);
+        }
+    }
+
+    #[test]
+    fn import_tsv_lowercase_and_chinese_lex_remain_compatible() {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        assert_eq!(store.import_tsv(&arts, "lex\thfo\t12.5\nlex\t你好你\t4.0\nzhword\t你好你\tni hao ni\n").unwrap(), 3);
+        let en_token = store.ext_map.get("hfo").copied().unwrap();
+        assert_eq!(store.lex_en.get(&en_token), Some(&12.5));
+        let mut english = Vec::new();
+        store.view(None).matchers().en.for_matches("hfo", 0, |end, entries| {
+            if end == 3 {
+                english.extend(entries.iter().map(|entry| (entry.lm_token, entry.text.to_string())));
+            }
+        });
+        assert_eq!(english, vec![(en_token, "hfo".to_string())]);
+        let zh_token = store.ext_map.get("你好你").copied().unwrap();
+        assert_eq!(store.lex_zh.get(&zh_token), Some(&4.0));
+        let mut chinese = Vec::new();
+        store.view(None).matchers().zh.for_matches("nihaoni", 0, |end, entries| {
+            if end == 7 {
+                chinese.extend(entries.iter().map(|entry| (entry.lm_token, entry.text.to_string())));
+            }
+        });
+        assert_eq!(chinese, vec![(zh_token, "你好你".to_string())]);
+    }
+
+    #[test]
     fn import_tsv_case_only_refreshes_existing_english_arc() {
         let arts = mini_artifacts();
         let mut store = PersonalStore::new(&arts);
