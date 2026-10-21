@@ -878,6 +878,22 @@ mod tests {
     use crate::artifacts::tests::mini_artifacts;
 
     #[test]
+    fn import_tsv_english_lex_without_case_creates_arc() {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        assert_eq!(store.import_tsv(&arts, "lex\thfo\t12.5\n").unwrap(), 1);
+
+        let view = store.view(None);
+        let mut found = false;
+        view.matchers().en.for_matches("hfo", 0, |end, entries| {
+            if end == 3 && entries.iter().any(|entry| &*entry.text == "hfo") {
+                found = true;
+            }
+        });
+        assert!(found, "imported English lex without case should create an hfo arc ending at 3");
+    }
+
+    #[test]
     fn import_tsv_rejects_malformed_ngram_tokens_and_columns() {
         let arts = mini_artifacts();
         let mut failures = Vec::new();
