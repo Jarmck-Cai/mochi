@@ -878,6 +878,28 @@ mod tests {
     use crate::artifacts::tests::mini_artifacts;
 
     #[test]
+    fn import_tsv_case_only_refreshes_existing_english_arc() {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        // Rust string escapes produce actual TSV tabs and newlines at runtime.
+        assert_eq!(store.import_tsv(&arts, "lex\thfo\t12.5\n").unwrap(), 1);
+        let arc_texts = |store: &PersonalStore| {
+            let mut texts = Vec::new();
+            store.view(None).matchers().en.for_matches("hfo", 0, |end, entries| {
+                if end == 3 {
+                    texts.extend(entries.iter().map(|entry| entry.text.to_string()));
+                }
+            });
+            texts
+        };
+        assert_eq!(arc_texts(&store), vec!["hfo"]);
+
+        assert_eq!(store.import_tsv(&arts, "case\thfo\tHFO\n").unwrap(), 1);
+        assert_eq!(arc_texts(&store), vec!["HFO"],
+            "case-only import must refresh the existing English arc ending at 3");
+    }
+
+    #[test]
     fn import_tsv_english_lex_without_case_creates_arc() {
         let arts = mini_artifacts();
         let mut store = PersonalStore::new(&arts);
