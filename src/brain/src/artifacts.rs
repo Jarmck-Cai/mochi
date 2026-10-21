@@ -161,6 +161,9 @@ fn parse_ngram(text: &str, interner: &mut Interner) -> Result<BackoffTrigramLm, 
         let count: f32 = count
             .parse()
             .map_err(|_| format!("ngram.tsv line {}: bad count '{}'", no + 1, count))?;
+        if !count.is_finite() {
+            return Err(format!("ngram.tsv line {}: non-finite count", no + 1));
+        }
         let expected = match order {
             "1" => 1,
             "2" => 2,
