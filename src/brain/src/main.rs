@@ -12,6 +12,7 @@ mod artifacts;
 mod decoder;
 mod engine;
 mod interner;
+mod ipc;
 mod lattice;
 mod lm;
 mod personal;
@@ -23,16 +24,10 @@ use std::sync::Arc;
 
 use engine::Engine;
 use windows_sys::Win32::Foundation::{
-    CloseHandle, GetLastError, ERROR_BROKEN_PIPE, ERROR_MORE_DATA, ERROR_PIPE_CONNECTED,
-    INVALID_HANDLE_VALUE,
+    CloseHandle, GetLastError, ERROR_BROKEN_PIPE, ERROR_MORE_DATA,
 };
-use windows_sys::Win32::Storage::FileSystem::{
-    FlushFileBuffers, ReadFile, WriteFile, PIPE_ACCESS_DUPLEX,
-};
-use windows_sys::Win32::System::Pipes::{
-    ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_READMODE_MESSAGE,
-    PIPE_TYPE_MESSAGE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
-};
+use windows_sys::Win32::Storage::FileSystem::{FlushFileBuffers, ReadFile, WriteFile};
+use windows_sys::Win32::System::Pipes::DisconnectNamedPipe;
 
 const PIPE_NAME: &str = r"\\.\pipe\mochi-brain-v0";
 const MAX_MESSAGE: usize = 64 * 1024;
@@ -42,10 +37,6 @@ const MAX_MESSAGE: usize = 64 * 1024;
 /// ownership of each connected instance to its serving thread.
 struct PipeHandle(isize);
 unsafe impl Send for PipeHandle {}
-
-fn wide(s: &str) -> Vec<u16> {
-    s.encode_utf16().chain(std::iter::once(0)).collect()
-}
 
 /// Default artifacts dir: `artifacts/v0` relative to the repo root — try the
 /// cwd first, then walk up from the exe location (target/release/... -> repo).
@@ -206,37 +197,20 @@ fn main() {
         return;
     }
     eprintln!("[brain] mochi-brain listening on {}", PIPE_NAME);
-    let name = wide(PIPE_NAME);
+    let mut listener = ipc::PipeListener::bind(PIPE_NAME).unwrap_or_else(|error| {
+        eprintln!("[brain] pipe bind failed: {}", error);
+        std::process::exit(1);
+    });
     let mut client_seq: u64 = 0;
     loop {
-        // A fresh instance per client; PIPE_UNLIMITED_INSTANCES allows
-        // concurrent clients, each instance owned by one serving thread.
-        let pipe = unsafe {
-            CreateNamedPipeW(
-                name.as_ptr(),
-                PIPE_ACCESS_DUPLEX,
-                PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
-                PIPE_UNLIMITED_INSTANCES,
-                MAX_MESSAGE as u32,
-                MAX_MESSAGE as u32,
-                0,
-                ptr::null(),
-            )
+        let pipe = match listener.accept() {
+            Ok(pipe) => pipe,
+            Err(error) => {
+                eprintln!("[brain] pipe accept failed: {}", error);
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                continue;
+            }
         };
-        if pipe == INVALID_HANDLE_VALUE {
-            eprintln!(
-                "[brain] CreateNamedPipeW failed (err={}), retrying in 1s",
-                unsafe { GetLastError() }
-            );
-            std::thread::sleep(std::time::Duration::from_secs(1));
-            continue;
-        }
-        let connected = unsafe { ConnectNamedPipe(pipe, ptr::null_mut()) };
-        if connected == 0 && unsafe { GetLastError() } != ERROR_PIPE_CONNECTED {
-            // e.g. client connected and vanished between create and connect
-            unsafe { CloseHandle(pipe) };
-            continue;
-        }
         client_seq += 1;
         let id = client_seq;
         eprintln!("[brain] client #{} connected", id);
