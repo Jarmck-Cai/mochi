@@ -403,6 +403,52 @@ pub(crate) mod tests {
     use super::*;
 
     #[test]
+    fn ngram_nonfinite_counts_report_file_and_actual_line() {
+        let mut failures = Vec::new();
+        for (order, tokens) in [("1", "你"), ("2", "<s> 你"), ("3", "<s> <s> 你")] {
+            for count in ["NaN", "inf", "-inf", "1e39"] {
+                // Physical line numbers include comments, blanks, and valid data.
+                let ngram = format!(
+                    "# total_tokens=100\n# backoff=stupid:0.4\n\n1\thello\t2.5\n# fixture\n\n{order}\t{tokens}\t{count}\n"
+                );
+                match Artifacts::from_strs("ni\t你\t1\n", &ngram, "hello\t1\n") {
+                    Ok(_) => failures.push(format!("accepted nonfinite count {count:?} for order {order}")),
+                    Err(error) => {
+                        if !error.contains("ngram.tsv line 7:") {
+                            failures.push(format!("wrong location for order {order}, {count:?}: {error}"));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn ngram_finite_float_counts_preserve_backoff_ratios() {
+        let ngram = "# total_tokens=100\n# backoff=stupid:0.4\n\n\
+                     1\t你\t2.5\n1\t<s>\t1\n\
+                     2\t<s> 你\t1.5\n2\t<s> hello\t0.5\n\
+                     3\t<s> <s> 你\t0.5\n3\t<s> <s> hello\t1.5\n";
+        let artifacts = Artifacts::from_strs("ni\t你\t1\n", ngram, "hello\t1\n")
+            .expect("finite fractional counts must load");
+        let ni = artifacts.interner.get("你").unwrap();
+        let unknown = crate::interner::UNK;
+        assert_eq!(artifacts.stats.ngrams, (2, 2, 2));
+        assert_eq!(artifacts.lm.total, 100.0);
+        assert_eq!(artifacts.lm.alpha, 0.4);
+        for (h2, h1, probability) in [
+            (unknown, unknown, 0.4_f64.powi(2) * 2.5 / 100.0),
+            (unknown, artifacts.bos, 0.4 * 1.5 / 2.0),
+            (artifacts.bos, artifacts.bos, 0.5 / 2.0),
+        ] {
+            let score = artifacts.lm.logp(ni, h2, h1);
+            assert!(score.is_finite());
+            assert!((score - probability.log10()).abs() < 1e-12);
+        }
+    }
+
+    #[test]
     fn ngram_header_blank_line_preserves_required_hyperparameters() {
         let ngram = "# total_tokens=100\n\n# backoff=stupid:0.4\n1\thello\t2.5\n";
         let result = Artifacts::from_strs("ni\t你\t1\n", ngram, "hello\t1\n");
