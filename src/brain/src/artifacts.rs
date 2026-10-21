@@ -403,6 +403,49 @@ pub(crate) mod tests {
     use super::*;
 
     #[test]
+    fn ngram_header_blank_line_preserves_required_hyperparameters() {
+        let ngram = "# total_tokens=100\n\n# backoff=stupid:0.4\n1\thello\t2.5\n";
+        let result = Artifacts::from_strs("ni\t你\t1\n", ngram, "hello\t1\n");
+        assert!(result.is_ok(), "blank header line must load: {:?}", result.as_ref().err());
+        let artifacts = result
+            .unwrap_or_else(|error| panic!("blank header line must load: {error}"));
+        assert_eq!(artifacts.lm.total, 100.0);
+        assert_eq!(artifacts.lm.alpha, 0.4);
+    }
+
+    #[test]
+    fn ngram_header_layouts_preserve_hyperparameters_and_data() {
+        for header in [
+            "# total_tokens=100\n# backoff=stupid:0.4\n",
+            "\n# total_tokens=100\n\n# backoff=stupid:0.4\n\n",
+            "# total_tokens=100\r\n\r\n# backoff=stupid:0.4\r\n",
+        ] {
+            let ngram = format!("{header}\n1\thello\t2.5\n\n# total_tokens=999\n# backoff=stupid:0.9\n\n2\t<s> hello\t1.5\n");
+            let artifacts = Artifacts::from_strs("ni\t你\t1\n", &ngram, "hello\t1\n")
+                .unwrap_or_else(|error| panic!("header {header:?} must load: {error}"));
+            assert_eq!(artifacts.lm.total, 100.0);
+            assert_eq!(artifacts.lm.alpha, 0.4);
+            assert_eq!(artifacts.stats.ngrams, (1, 1, 0));
+        }
+    }
+
+    #[test]
+    fn ngram_header_requires_both_hyperparameters_before_first_data() {
+        for (header, late_header, missing) in [
+            ("# total_tokens=100\n", "# backoff=stupid:0.4\n", "backoff=stupid:<alpha>"),
+            ("# backoff=stupid:0.4\n", "# total_tokens=100\n", "total_tokens=<N>"),
+        ] {
+            for suffix in ["", late_header] {
+                let ngram = format!("{header}\n1\thello\t2.5\n\n{suffix}");
+                match Artifacts::from_strs("ni\t你\t1\n", &ngram, "hello\t1\n") {
+                    Ok(_) => panic!("accepted missing header {missing}"),
+                    Err(error) => assert!(error.contains(missing), "wrong error: {error}"),
+                }
+            }
+        }
+    }
+
+    #[test]
     fn english_missing_rank_is_rejected() {
         assert!(Artifacts::from_strs(MINI_DICT, MINI_NGRAM, "test").is_err());
     }
