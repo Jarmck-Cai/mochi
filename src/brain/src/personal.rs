@@ -725,6 +725,7 @@ impl PersonalStore {
                         .or_default()
                         .entry(b.into())
                         .or_insert(0.0) += 1.0;
+                    en_words.push((tok, a.to_string()));
                 }
                 "zhword" => {
                     let tok = self.token(arts, a);
