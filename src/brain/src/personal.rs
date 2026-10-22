@@ -740,6 +740,9 @@ impl PersonalStore {
                 }
                 "1" | "2" | "3" => {
                     let count: f64 = b.parse().map_err(|_| badnum(b))?;
+                    if !count.is_finite() {
+                        return Err(format!("personal.tsv line {}: non-finite count", no + 1));
+                    }
                     // Validate the whole field before interning any token.
                     let words: Vec<&str> = a.split(' ').collect();
                     let order = match kind {
