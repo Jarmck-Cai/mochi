@@ -420,6 +420,44 @@ fn parse_english(text: &str, interner: &mut Interner) -> Result<(Matcher, usize)
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    fn ngram_example_total_comment_does_not_override_header() {
+        let ngram = "# total_tokens=100\n# backoff=stupid:0.4\n# example total_tokens=invalid\n1\t你\t1";
+        let result = Artifacts::from_strs("ni\t你\t1", ngram, "hello\t1");
+        assert!(result.is_ok(), "ordinary total comment: {:?}", result.as_ref().err());
+        let artifacts = result.unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(artifacts.lm.total, 100.0);
+        assert_eq!(artifacts.lm.alpha, 0.4);
+    }
+
+    #[test]
+    fn ngram_example_backoff_comment_does_not_override_header() {
+        let ngram = "# total_tokens=100\n# backoff=stupid:0.4\n# example backoff=stupid:invalid\n1\t你\t1";
+        let result = Artifacts::from_strs("ni\t你\t1", ngram, "hello\t1");
+        assert!(result.is_ok(), "ordinary backoff comment: {:?}", result.as_ref().err());
+        let artifacts = result.unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(artifacts.lm.total, 100.0);
+        assert_eq!(artifacts.lm.alpha, 0.4);
+    }
+
+    #[test]
+    fn ngram_example_comments_preserve_header_layout_and_override_order() {
+        for newline in ["\n", "\r\n"] {
+            let ngram = [
+                "", "# total_tokens=200", "# backoff=stupid:0.8", "",
+                "# total_tokens=100", "# backoff=stupid:0.4",
+                "# example total_tokens=999", "# example backoff=stupid:0.9", "",
+                "1\t你\t1", "# total_tokens=invalid", "# backoff=stupid:invalid", "",
+            ].join(newline);
+            let result = Artifacts::from_strs("ni\t你\t1", &ngram, "hello\t1");
+            assert!(result.is_ok(), "layout {newline:?}: {:?}", result.as_ref().err());
+            let artifacts = result.unwrap_or_else(|error| panic!("{error}"));
+            assert_eq!(artifacts.lm.total, 100.0);
+            assert_eq!(artifacts.lm.alpha, 0.4);
+            assert_eq!(artifacts.stats.ngrams, (1, 0, 0));
+        }
+    }
+
     fn assert_dict_tone_digit_rejected(tone: u8) {
         let dict = format!("ni{tone}\t你\t1\n");
         let ngram = "# total_tokens=1\n# backoff=stupid:0.4\n";
