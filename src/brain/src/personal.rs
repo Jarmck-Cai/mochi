@@ -737,6 +737,9 @@ impl PersonalStore {
                     en_words.push((tok, a.to_string()));
                 }
                 "zhword" => {
+                    if a.is_empty() {
+                        return Err(format!("personal.tsv line {}: expected non-empty word", no + 1));
+                    }
                     // Preserve ASCII-space boundaries and validate before interning.
                     if b.split(' ').any(|syllable| syllable.is_empty()) {
                         return Err(format!(
