@@ -166,6 +166,40 @@ impl PersonalLayer for NoPersonalLayer {}
 mod tests {
     use super::*;
 
+    #[test]
+    fn bigram_finite_counts_above_f32_history_range_stay_normalized() {
+        let (a, b, c) = (0, 1, 2);
+        let mut lm = BackoffTrigramLm::new(0.4, 1e39);
+        lm.add_bigram(a, b, 3e38);
+        lm.add_bigram(a, c, 3e38);
+        lm.finalize(3);
+
+        let expected = 0.4f64.log10() + 0.5f64.log10();
+        for w in [b, c] {
+            let actual = lm.logp(w, crate::interner::UNK, a);
+            assert!(actual.is_finite(), "bigram logp for {w}: {actual}");
+            assert!((actual - expected).abs() < 1e-6,
+                "bigram logp for {w}: expected {expected}, got {actual}");
+        }
+    }
+
+    #[test]
+    fn trigram_finite_counts_above_f32_history_range_stay_normalized() {
+        let (x, a, b, c) = (0, 1, 2, 3);
+        let mut lm = BackoffTrigramLm::new(0.4, 1e39);
+        lm.add_trigram(x, a, b, 3e38);
+        lm.add_trigram(x, a, c, 3e38);
+        lm.finalize(4);
+
+        let expected = 0.5f64.log10();
+        for w in [b, c] {
+            let actual = lm.logp(w, x, a);
+            assert!(actual.is_finite(), "trigram logp for {w}: {actual}");
+            assert!((actual - expected).abs() < 1e-6,
+                "trigram logp for {w}: expected {expected}, got {actual}");
+        }
+    }
+
     /// Mini LM mirroring lm.py semantics:
     /// total=1000; uni: A=100 B=50; bi: (A,B)=20 (A,C missing); tri: (X,A,B)=8
     fn mini() -> (BackoffTrigramLm, u32, u32, u32, u32) {
