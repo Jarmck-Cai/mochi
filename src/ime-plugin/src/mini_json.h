@@ -257,13 +257,39 @@ class Parser {
   }
   bool ParseNumber(Value* out) {
     const char* start = p_;
-    if (p_ != end_ && (*p_ == '-' || *p_ == '+'))
+    // Validate the JSON lexeme before retaining the existing double conversion.
+    if (p_ != end_ && *p_ == '-')
       ++p_;
-    while (p_ != end_ && ((*p_ >= '0' && *p_ <= '9') || *p_ == '.' ||
-                          *p_ == 'e' || *p_ == 'E' || *p_ == '-' || *p_ == '+'))
-      ++p_;
-    if (p_ == start)
+    if (p_ == end_)
       return false;
+    if (*p_ == '0') {
+      ++p_;
+    } else {
+      if (*p_ < '1' || *p_ > '9')
+        return false;
+      do {
+        ++p_;
+      } while (p_ != end_ && *p_ >= '0' && *p_ <= '9');
+    }
+    if (p_ != end_ && *p_ == '.') {
+      ++p_;
+      const char* digits = p_;
+      while (p_ != end_ && *p_ >= '0' && *p_ <= '9')
+        ++p_;
+      if (p_ == digits)
+        return false;
+    }
+    if (p_ != end_ && (*p_ == 'e' || *p_ == 'E')) {
+      ++p_;
+      if (p_ != end_ && (*p_ == '+' || *p_ == '-'))
+        ++p_;
+      const char* digits = p_;
+      while (p_ != end_ && *p_ >= '0' && *p_ <= '9')
+        ++p_;
+      if (p_ == digits)
+        return false;
+    }
+    // The caller enforces the enclosing object's/array's delimiter and EOF.
     out->type = Value::Type::kNumber;
     out->number = std::strtod(std::string(start, p_).c_str(), nullptr);
     return true;
