@@ -727,6 +727,9 @@ impl PersonalStore {
                     }
                 }
                 "case" => {
+                    if b.is_empty() {
+                        return Err(format!("personal.tsv line {}: expected non-empty case preference", no + 1));
+                    }
                     let tok = self.token(arts, a);
                     *self
                         .case_counts
