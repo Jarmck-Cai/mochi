@@ -407,6 +407,47 @@ fn parse_english(text: &str, interner: &mut Interner) -> Result<(Matcher, usize)
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    fn assert_dict_empty_syllable_rejected(key: &str) {
+        let ngram = "# total_tokens=100\n# backoff=stupid:0.4\n1\thello\t2.5\n";
+        let dict = format!("# fixture\n\nni\t你\t3\n# comment\n\n{key}\t你好\t1\n");
+        let result = Artifacts::from_strs(&dict, ngram, "hello\t1\n");
+        assert!(result.is_err(), "accepted empty syllable in dict.tsv line 6: {key:?}");
+        let error = result.err().unwrap();
+        assert!(error.contains("dict.tsv line 6:"), "wrong location for {key:?}: {error}");
+    }
+
+    #[test]
+    fn dict_empty_key_is_rejected() {
+        assert_dict_empty_syllable_rejected("");
+    }
+
+    #[test]
+    fn dict_leading_empty_syllable_is_rejected() {
+        assert_dict_empty_syllable_rejected(" ni");
+    }
+
+    #[test]
+    fn dict_trailing_empty_syllable_is_rejected() {
+        assert_dict_empty_syllable_rejected("ni ");
+    }
+
+    #[test]
+    fn dict_internal_empty_syllable_is_rejected() {
+        assert_dict_empty_syllable_rejected("ni  hao");
+    }
+
+    #[test]
+    fn dict_valid_syllable_keys_preserve_loading() {
+        let ngram = "# total_tokens=100\n# backoff=stupid:0.4\n1\thello\t2.5\n";
+        for weight in ["3", "2.5", "-1.5", "NaN", "inf", "invalid", ""] {
+            let dict = format!("# fixture\n\nni\t你\t{weight}\nni hao\t你好\t{weight}\n\n# end\n");
+            let artifacts = Artifacts::from_strs(&dict, ngram, "hello\t1\n")
+                .unwrap_or_else(|error| panic!("valid keys with weight {weight:?}: {error}"));
+            assert_eq!(artifacts.stats.dict_entries, 2);
+            assert_eq!(artifacts.builder.char_matcher.get("ni").unwrap()[0].pinyin.as_ref(), "ni");
+            assert_eq!(artifacts.builder.word_matcher.get("nihao").unwrap()[0].pinyin.as_ref(), "ni hao");
+        }
+    }
 
     #[test]
     fn ngram_effective_nonfinite_alpha_is_rejected() {
