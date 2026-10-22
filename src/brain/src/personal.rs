@@ -897,6 +897,26 @@ mod tests {
     use super::*;
     use crate::artifacts::tests::mini_artifacts;
 
+    #[test]
+    fn import_tsv_zhword_empty_word_is_rejected_before_registration() {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        let fixture = "# synthetic personal fixture\n\n# empty word follows\nzhword\t\tni hao\n";
+        let result = store.import_tsv(&arts, fixture);
+        assert!(result.is_err(), "empty zhword must be rejected, got {result:?}");
+        let error = result.unwrap_err();
+        assert!(error.contains("personal.tsv line 4:"), "{error}");
+        assert!(store.ext_map.is_empty(), "invalid row must not register a token");
+        assert!(store.zh_added.is_empty(), "invalid row must not register a Chinese arc");
+        let mut arcs = Vec::new();
+        store.view(None).matchers().zh.for_matches("nihao", 0, |end, entries| {
+            arcs.extend(entries.iter().map(|entry| (end, entry.text.to_string())));
+        });
+        assert!(arcs.iter().all(|(_, text)| !text.is_empty()),
+            "invalid row created an empty-text arc: {arcs:?}");
+        assert!(arcs.is_empty(), "invalid row created Chinese arcs: {arcs:?}");
+    }
+
     fn check_zhword_empty_syllable(pinyin: &str) {
         let arts = mini_artifacts();
         for (prefix, line) in [("", 1), ("# synthetic fixture\n\n# invalid row follows\n", 4)] {
