@@ -730,6 +730,9 @@ impl PersonalStore {
                     }
                 }
                 "case" => {
+                    if a.is_empty() {
+                        return Err(format!("personal.tsv line {}: expected non-empty word", no + 1));
+                    }
                     if b.is_empty() {
                         return Err(format!("personal.tsv line {}: expected non-empty case preference", no + 1));
                     }
