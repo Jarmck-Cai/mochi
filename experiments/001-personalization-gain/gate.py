@@ -62,11 +62,33 @@ def decode_top1(artifacts: Path, keys: list[str]) -> dict[str, str]:
         if proc.returncode != 0:
             sys.exit(f"brain failed to decode against {artifacts} "
                      f"(exit {proc.returncode}): {proc.stderr.strip().splitlines()[-1] if proc.stderr.strip() else 'no stderr'}")
+        # Validate each process response before merging: absent ASCII results
+        # are measurement failures, not misses that may enter the net score.
+        requested = set(chunk)
+        required = {key for key in chunk if key and key.isascii()}
+        chunk_top1: dict[str, str] = {}
         for line in proc.stdout.splitlines():
             cols = line.split("\t")
             # main.rs decode line: keys \t #N \t text \t comment \t preedit \t quality \t us
-            if len(cols) >= 3 and cols[1] == "#1":
-                top1[cols[0]] = cols[2]
+            if len(cols) < 3:
+                sys.exit(f"decode output against {artifacts}: missing required columns "
+                         f"in chunk {i // DECODE_CHUNK + 1}")
+            key, rank, text = cols[:3]
+            if key not in requested:
+                sys.exit(f"decode output against {artifacts}: unknown key {key!r} "
+                         f"in chunk {i // DECODE_CHUNK + 1}")
+            if (not rank.startswith("#") or not rank[1:].isascii()
+                    or not rank[1:].isdigit() or rank[1] == "0"):
+                sys.exit(f"decode output against {artifacts}: invalid rank {rank!r}")
+            if rank == "#1":
+                if key in chunk_top1:
+                    sys.exit(f"decode output against {artifacts}: duplicate #1 for {key!r}")
+                chunk_top1[key] = text
+        missing = required - chunk_top1.keys()
+        if missing:
+            sys.exit(f"decode output against {artifacts}: missing #1 for "
+                     f"{sorted(missing)!r} in chunk {i // DECODE_CHUNK + 1}")
+        top1.update(chunk_top1)
     return top1
 
 
