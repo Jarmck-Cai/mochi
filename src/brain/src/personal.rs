@@ -929,6 +929,87 @@ fn align(units: &[Unit], keys: &str, arts: &Artifacts) -> Option<Vec<String>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn import_tsv_accumulation_overflow_exact_reproduction() {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        let result = store.import_tsv(&arts, "2\t<s> 你\t1e308\n2\t<s> 好\t1e308\n");
+        assert!(result.is_err(), "second row must reject overflowing history denominator, got {result:?}");
+        assert!(result.unwrap_err().contains("personal.tsv line 2:"));
+        let ni = arts.interner.get("你").unwrap();
+        assert_eq!(store.global.bi.len(), 1);
+        assert_eq!(store.global.uni_hist[&arts.bos], 1e308);
+        assert!(store.global.p(ni, arts.bos, arts.bos) > 0.0);
+    }
+
+    fn check_import_accumulation_overflow(first: &str, second: &str) {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        assert_eq!(store.import_tsv(&arts, first).unwrap(), 1);
+        let counts = (
+            store.global.uni.clone(), store.global.bi.clone(), store.global.tri.clone(),
+            store.global.uni_hist.clone(), store.global.bi_hist.clone(), store.global.total,
+        );
+        let tokens = store.ext_map.clone();
+        let lex = (store.lex_en.clone(), store.lex_zh.clone());
+        let fixture = format!("# synthetic fixture\n\n{second}");
+        let result = store.import_tsv(&arts, &fixture);
+        assert!(result.is_err(), "overflowing row {second:?} must return Err, got {result:?}");
+        let error = result.unwrap_err();
+        assert!(error.contains("personal.tsv line 3:"), "{error}");
+        assert_eq!(store.global.uni, counts.0, "rejected row changed unigram counts");
+        assert_eq!(store.global.bi, counts.1, "rejected row changed bigram counts");
+        assert_eq!(store.global.tri, counts.2, "rejected row changed trigram counts");
+        assert_eq!(store.global.uni_hist, counts.3);
+        assert_eq!(store.global.bi_hist, counts.4);
+        assert_eq!(store.global.total, counts.5);
+        assert_eq!(store.ext_map, tokens, "rejected row interned a token");
+        assert_eq!((store.lex_en, store.lex_zh), lex);
+    }
+
+    macro_rules! accumulation_overflow_test {
+        ($name:ident, $first:expr, $second:expr) => {
+            #[test]
+            fn $name() { check_import_accumulation_overflow($first, $second); }
+        };
+    }
+    accumulation_overflow_test!(import_tsv_accumulation_overflow_unigram_total,
+        "1\tfirstsynthetic\t1e308\n", "1\tsecondsynthetic\t1e308\n");
+    accumulation_overflow_test!(import_tsv_accumulation_overflow_bigram_history,
+        "2\t<s> firstsynthetic\t1e308\n", "2\t<s> secondsynthetic\t1e308\n");
+    accumulation_overflow_test!(import_tsv_accumulation_overflow_trigram_history,
+        "3\t<s> historysynthetic firstsynthetic\t1e308\n", "3\t<s> historysynthetic secondsynthetic\t1e308\n");
+    accumulation_overflow_test!(import_tsv_accumulation_overflow_unigram_duplicate,
+        "1\tfirstsynthetic\t1e308\n", "1\tfirstsynthetic\t1e308\n");
+    accumulation_overflow_test!(import_tsv_accumulation_overflow_bigram_duplicate,
+        "2\t<s> firstsynthetic\t1e308\n", "2\t<s> firstsynthetic\t1e308\n");
+    accumulation_overflow_test!(import_tsv_accumulation_overflow_trigram_duplicate,
+        "3\t<s> <s> firstsynthetic\t1e308\n", "3\t<s> <s> firstsynthetic\t1e308\n");
+    accumulation_overflow_test!(import_tsv_accumulation_overflow_english_lex,
+        "lex\tfirstsynthetic\t1e308\n", "lex\tfirstsynthetic\t1e308\n");
+    accumulation_overflow_test!(import_tsv_accumulation_overflow_chinese_lex,
+        "lex\t合成词\t1e308\n", "lex\t合成词\t1e308\n");
+
+    #[test]
+    fn import_tsv_accumulation_overflow_small_counts_compatible() {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        let rows = "1\t你\t0.5\n2\t<s> 你\t0.5\n3\t<s> <s> 你\t0.5\nlex\thfo\t0.5\nlex\t合成词\t0.5\n";
+        for _ in 0..3 {
+            assert_eq!(store.import_tsv(&arts, rows).unwrap(), 5);
+        }
+        let ni = arts.interner.get("你").unwrap();
+        assert_eq!(store.global.uni[&ni], 1.5);
+        assert_eq!(store.global.total, 1.5);
+        assert_eq!(store.global.bi[&bi_key(arts.bos, ni)], 1.5);
+        assert_eq!(store.global.uni_hist[&arts.bos], 1.5);
+        assert_eq!(store.global.tri[&tri_key(arts.bos, arts.bos, ni)], 1.5);
+        assert_eq!(store.global.bi_hist[&bi_key(arts.bos, arts.bos)], 1.5);
+        assert_eq!(store.lex_en[&store.ext_map["hfo"]], 1.5);
+        assert_eq!(store.lex_zh[&store.ext_map["合成词"]], 1.5);
+        assert_eq!(store.global.p(ni, arts.bos, arts.bos), 1.0);
+    }
+
     fn check_zhword_tone_digit(pinyin: &str) {
         let arts = mini_artifacts();
         for (prefix, line) in [("# fixture\n\n", 3), ("# fixture\n\n# comment\n\n", 5)] {
