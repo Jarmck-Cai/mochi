@@ -141,6 +141,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn casing_correction_retracts_old_votes_for_exact_query() {
+        let e = Engine::mini();
+        for _ in 0..3 {
+            e.commit("test", Some("test"), None);
+        }
+        assert_eq!(e.query("test", None)[0].text, "test");
+
+        e.commit("TEST", Some("test"), None);
+
+        assert_eq!(e.query("test", None)[0].text, "TEST");
+    }
+
+    #[test]
+    fn casing_correction_retracts_old_votes_for_completion() {
+        let e = Engine::mini();
+        for _ in 0..3 {
+            e.commit("test", Some("test"), None);
+        }
+        e.commit("TEST", Some("test"), None);
+
+        let candidates = e.query("tes", None);
+        assert_eq!(candidates[0].text, "TEST");
+        assert_eq!(candidates[0].comment, "▸T");
+    }
+
+    #[test]
     fn english_completion_uses_learned_casing() {
         let e = Engine::mini();
         e.commit("TEST", Some("test"), None);
