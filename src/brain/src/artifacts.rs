@@ -514,22 +514,45 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn ngram_nonfinite_total_keeps_existing_loading_and_scoring() {
-        for total in ["NaN", "inf", "-inf", "1e309"] {
-            let ngram = format!("# total_tokens={total}\n# backoff=stupid:0.4\n1\thello\t2.5\n");
-            let artifacts = Artifacts::from_strs("ni\t你\t1\n", &ngram, "hello\t1\n")
-                .unwrap_or_else(|error| panic!("legacy total {total} must load: {error}"));
-            let total: f64 = total.parse().unwrap();
-            if total.is_nan() {
-                assert!(artifacts.lm.total.is_nan());
-            } else {
-                assert_eq!(artifacts.lm.total, total);
+    fn ngram_nonfinite_total_is_rejected() {
+        let mut failures = Vec::new();
+        for total in ["NaN", "inf", "-inf", "1e309", "-1e309"] {
+            for header in [
+                format!("# total_tokens={total}\n# backoff=stupid:0.4\n"),
+                format!("\r\n# fixture\r\n# total_tokens=100\r\n\r\n# backoff=stupid:0.4\r\n# total_tokens={total}\r\n\r\n"),
+            ] {
+                let ngram = format!("{header}1\t你\t1\n# total_tokens=100\n");
+                let result = Artifacts::from_strs("ni\t你\t1\n", &ngram, "hello\t1\n");
+                if !result.is_err() {
+                    failures.push(format!("accepted nonfinite total_tokens {total:?}: {header:?}"));
+                } else {
+                    let error = result.err().unwrap();
+                    if !error.contains("ngram.tsv") || !error.contains("total_tokens") {
+                        failures.push(format!("wrong error for total_tokens {total:?}: {error}"));
+                    }
+                }
             }
-            let hello = artifacts.interner.get("hello").unwrap();
-            let expected = 2.0 * 0.4_f64.log10()
-                + if total > 0.0 { (2.5 / total).log10() } else { crate::lm::OOV_LOGP };
-            assert_eq!(artifacts.lm.logp(hello, crate::interner::UNK, crate::interner::UNK), expected);
         }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn ngram_finite_total_preserves_loading_and_final_header_override() {
+        // Finite zero and negative values retain their existing accepted range.
+        for total in ["1", "2.5", "100", "1e308", "0", "-1", "-1e308"] {
+            for earlier in ["NaN", "inf", "-inf", "1e309", "-1e309", "invalid"] {
+                let ngram = format!(
+                    "\r\n# total_tokens={earlier}\r\n\r\n# fixture\r\n# backoff=stupid:0.4\r\n# total_tokens={total}\r\n\r\n1\t你\t1\r\n# total_tokens=NaN\r\n"
+                );
+                let artifacts = Artifacts::from_strs("ni\t你\t1\n", &ngram, "hello\t1\n")
+                    .unwrap_or_else(|error| panic!("final finite total_tokens {total}: {error}"));
+                assert_eq!(artifacts.lm.total, total.parse::<f64>().unwrap());
+                assert_eq!(artifacts.lm.alpha, 0.4);
+                assert_eq!(artifacts.stats.ngrams, (1, 0, 0));
+            }
+        }
+        let artifacts = mini_artifacts();
+        assert_eq!(artifacts.lm.total, 100000.0);
     }
 
     #[test]
