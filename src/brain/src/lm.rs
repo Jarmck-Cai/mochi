@@ -30,9 +30,10 @@ pub struct BackoffTrigramLm {
     log_alpha: f64,
     oov_logp: f64,
     pub total: f64,
-    uni: Vec<f32>,                // token id -> count (0.0 = unseen)
-    bi: FxHashMap<u64, f32>,      // (h1, w) -> count
-    tri: FxHashMap<u128, f32>,    // (h2, h1, w) -> count
+    // Widen before accumulation so duplicate finite f32 rows cannot overflow f32.
+    uni: Vec<f64>,                // token id -> count (0.0 = unseen)
+    bi: FxHashMap<u64, f64>,      // (h1, w) -> count
+    tri: FxHashMap<u128, f64>,    // (h2, h1, w) -> count
     bi_hist: FxHashMap<u64, f64>, // (h2, h1) -> Σ tri counts (trigram denominator)
     uni_hist: Vec<f64>,           // h1 -> Σ bi counts (bigram denominator)
 }
@@ -57,15 +58,15 @@ impl BackoffTrigramLm {
         if idx >= self.uni.len() {
             self.uni.resize(idx + 1, 0.0);
         }
-        self.uni[idx] += count;
+        self.uni[idx] += f64::from(count);
     }
 
     pub fn add_bigram(&mut self, h1: u32, w: u32, count: f32) {
-        *self.bi.entry(bi_key(h1, w)).or_insert(0.0) += count;
+        *self.bi.entry(bi_key(h1, w)).or_insert(0.0) += f64::from(count);
     }
 
     pub fn add_trigram(&mut self, h2: u32, h1: u32, w: u32, count: f32) {
-        *self.tri.entry(tri_key(h2, h1, w)).or_insert(0.0) += count;
+        *self.tri.entry(tri_key(h2, h1, w)).or_insert(0.0) += f64::from(count);
     }
 
     /// Build denominator tables (lm.py `finalize`). `vocab_size` is the
@@ -76,13 +77,13 @@ impl BackoffTrigramLm {
         }
         self.bi_hist.clear();
         for (&k, &c) in &self.tri {
-            *self.bi_hist.entry((k >> 32) as u64).or_insert(0.0) += c as f64;
+            *self.bi_hist.entry((k >> 32) as u64).or_insert(0.0) += c;
         }
         self.uni_hist = vec![0.0; vocab_size];
         for (&k, &c) in &self.bi {
             let h1 = (k >> 32) as usize;
             if h1 < self.uni_hist.len() {
-                self.uni_hist[h1] += c as f64;
+                self.uni_hist[h1] += c;
             }
         }
     }
@@ -95,7 +96,7 @@ impl BackoffTrigramLm {
                     if c3 > 0.0 {
                         if let Some(&denom) = self.bi_hist.get(&bi_key(h2, h1)) {
                             if denom > 0.0 {
-                                return (c3 as f64 / denom).log10();
+                                return (c3 / denom).log10();
                             }
                         }
                     }
@@ -108,14 +109,14 @@ impl BackoffTrigramLm {
                         // load, so ids can exceed the load-time vocab size.
                         let denom = self.uni_hist.get(h1 as usize).copied().unwrap_or(0.0);
                         if denom > 0.0 {
-                            return self.log_alpha + (c2 as f64 / denom).log10();
+                            return self.log_alpha + (c2 / denom).log10();
                         }
                     }
                 }
             }
             let c1 = self.uni.get(w as usize).copied().unwrap_or(0.0);
             if c1 > 0.0 && self.total > 0.0 {
-                return 2.0 * self.log_alpha + (c1 as f64 / self.total).log10();
+                return 2.0 * self.log_alpha + (c1 / self.total).log10();
             }
         }
         2.0 * self.log_alpha + self.oov_logp
@@ -129,10 +130,10 @@ impl BackoffTrigramLm {
     /// Rough heap usage in bytes for load-time reporting.
     pub fn est_bytes(&self) -> usize {
         // FxHashMap entry ≈ (key + val) / load_factor(~0.85) + control byte
-        let bi_entry = (8 + 4 + 1) * 100 / 85;
-        let tri_entry = (16 + 4 + 1) * 100 / 85;
+        let bi_entry = (8 + 8 + 1) * 100 / 85;
+        let tri_entry = (16 + 8 + 1) * 100 / 85;
         let bi_hist_entry = (8 + 8 + 1) * 100 / 85;
-        self.uni.len() * 4
+        self.uni.len() * 8
             + self.uni_hist.len() * 8
             + self.bi.len() * bi_entry
             + self.tri.len() * tri_entry
