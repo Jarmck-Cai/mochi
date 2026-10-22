@@ -739,6 +739,9 @@ impl PersonalStore {
                     if b.is_empty() {
                         return Err(format!("personal.tsv line {}: expected non-empty case preference", no + 1));
                     }
+                    if b.to_ascii_lowercase() != a {
+                        return Err(format!("personal.tsv line {}: case preference does not match key", no + 1));
+                    }
                     let tok = self.token(arts, a);
                     *self
                         .case_counts
