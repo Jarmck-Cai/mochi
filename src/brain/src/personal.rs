@@ -762,6 +762,12 @@ impl PersonalStore {
                             no + 1
                         ));
                     }
+                    if b.bytes().any(|byte| matches!(byte, b'1'..=b'5')) {
+                        return Err(format!(
+                            "personal.tsv line {}: expected toneless pinyin syllables",
+                            no + 1
+                        ));
+                    }
                     let tok = self.token(arts, a);
                     let word = a.to_string();
                     self.maybe_add_zh_arc(arts, tok, &word, Some(b), 0.0, true);
