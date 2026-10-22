@@ -1125,6 +1125,61 @@ mod tests {
         assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 
+    fn check_non_finite_lex_count(word: &str, count: &str) {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        let fixture = format!("# synthetic fixture\n\nlex\t{word}\t{count}\n");
+        assert!(store.import_tsv(&arts, &fixture).is_err(),
+            "lex {word:?} count {count} must return Err instead of Ok(1)");
+        let error = store.import_tsv(&arts, &fixture).unwrap_err();
+        assert!(error.contains("personal.tsv line 3:"), "{error}");
+        assert!(store.ext_map.is_empty(), "invalid row registered a token");
+        assert!(store.lex_en.is_empty() && store.lex_zh.is_empty());
+        assert!(store.en_added.is_empty() && store.zh_added.is_empty());
+        let mut found = false;
+        store.view(None).matchers().en.for_matches("hfo", 0, |_, entries| found |= !entries.is_empty());
+        store.view(None).matchers().zh.for_matches("nihaoni", 0, |_, entries| found |= !entries.is_empty());
+        assert!(!found, "invalid row generated an arc");
+    }
+
+    macro_rules! non_finite_lex_test {
+        ($name:ident, $word:expr, $count:expr) => {
+            #[test]
+            fn $name() { check_non_finite_lex_count($word, $count); }
+        };
+    }
+    non_finite_lex_test!(import_tsv_non_finite_lex_nan, "hfo", "NaN");
+    non_finite_lex_test!(import_tsv_non_finite_lex_inf, "hfo", "inf");
+    non_finite_lex_test!(import_tsv_non_finite_lex_neg_inf, "hfo", "-inf");
+    non_finite_lex_test!(import_tsv_non_finite_lex_overflow, "hfo", "1e999");
+    non_finite_lex_test!(import_tsv_non_finite_lex_neg_overflow, "hfo", "-1e999");
+    non_finite_lex_test!(import_tsv_non_finite_lex_zh_nan, "你好你", "NaN");
+    non_finite_lex_test!(import_tsv_non_finite_lex_zh_inf, "你好你", "inf");
+    non_finite_lex_test!(import_tsv_non_finite_lex_zh_neg_inf, "你好你", "-inf");
+    non_finite_lex_test!(import_tsv_non_finite_lex_zh_overflow, "你好你", "1e999");
+    non_finite_lex_test!(import_tsv_non_finite_lex_zh_neg_overflow, "你好你", "-1e999");
+
+    #[test]
+    fn import_tsv_non_finite_lex_finite_compatibility() {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        assert_eq!(store.import_tsv(&arts, "lex\tHFO\t1.25\nlex\t你好你\t0.5\n").unwrap(), 2);
+        let tok = store.ext_map["hfo"];
+        assert_eq!(store.lex_en[&tok], 1.25);
+        assert!(store.en_added.is_empty());
+        assert_eq!(store.import_tsv(&arts, "lex\thfo\t1.0\nlex\t你好你\t0.25\n").unwrap(), 2);
+        assert_eq!(store.lex_en[&tok], 2.25);
+        assert_eq!(store.lex_zh[&store.ext_map["你好你"]], 0.75);
+        assert!(!store.ext_map.contains_key("HFO"));
+        let mut arcs = Vec::new();
+        store.view(None).matchers().en.for_matches("hfo", 0, |end, entries| {
+            if end == 3 {
+                arcs.extend(entries.iter().map(|entry| (entry.lm_token, entry.text.to_string())));
+            }
+        });
+        assert_eq!(arcs, vec![(tok, "hfo".to_string())]);
+    }
+
     fn check_non_finite_personal_ngram_counts(order: &str, words: &str) {
         let arts = mini_artifacts();
         let mut failures = Vec::new();
