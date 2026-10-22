@@ -305,6 +305,11 @@ fn parse_dict(text: &str, interner: &mut Interner) -> Result<DictTables, String>
             if syl.is_empty() {
                 return Err(format!("dict.tsv line {}: empty pinyin syllable", no + 1));
             }
+            // Dictionary keys are toneless; reject tone digits without imposing
+            // a full pinyin spelling validator on otherwise accepted keys.
+            if syl.bytes().any(|b| matches!(b, b'1'..=b'5')) {
+                return Err(format!("dict.tsv line {}: tone digit in pinyin syllable", no + 1));
+            }
             syllables.add(syl);
         }
         let concat: String = key.split(' ').collect();
