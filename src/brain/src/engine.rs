@@ -152,6 +152,21 @@ mod tests {
     }
 
     #[test]
+    fn english_run_completion_uses_learned_casing() {
+        let e = Engine::mini();
+        e.commit("TEST", Some("test"), None);
+        e.commit("TEST", Some("test"), None);
+
+        // Both English arc kinds use en_continue after an English word.
+        // The personal surface must survive even when their scores tie.
+        assert_eq!(e.query("thetest", None)[0].text, "the TEST");
+        let completed = &e.query("thetes", None)[0];
+        assert_eq!(completed.text, "the TEST");
+        assert_eq!(completed.len, 6);
+        assert_eq!(completed.comment, "▸T");
+    }
+
+    #[test]
     fn query_returns_ranked_candidates_with_preedit() {
         let e = Engine::mini();
         let cands = e.query("nihao", None);
