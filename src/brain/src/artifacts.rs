@@ -415,6 +415,78 @@ fn parse_english(text: &str, interner: &mut Interner) -> Result<(Matcher, usize)
 
 #[cfg(test)]
 pub(crate) mod tests {
+    fn assert_dict_tone_digit_rejected(tone: u8) {
+        let dict = format!("ni{tone}\t你\t1\n");
+        let ngram = "# total_tokens=1\n# backoff=stupid:0.4\n";
+        assert!(
+            Artifacts::from_strs(&dict, ngram, "hello\t1\n").is_err(),
+            "accepted tone-bearing dictionary key ni{tone}"
+        );
+    }
+
+    #[test]
+    fn dict_tone_digit_1_is_rejected() {
+        assert_dict_tone_digit_rejected(1);
+    }
+
+    #[test]
+    fn dict_tone_digit_2_is_rejected() {
+        assert_dict_tone_digit_rejected(2);
+    }
+
+    #[test]
+    fn dict_tone_digit_3_is_rejected() {
+        assert_dict_tone_digit_rejected(3);
+    }
+
+    #[test]
+    fn dict_tone_digit_4_is_rejected() {
+        assert_dict_tone_digit_rejected(4);
+    }
+
+    #[test]
+    fn dict_tone_digit_5_is_rejected() {
+        assert_dict_tone_digit_rejected(5);
+    }
+
+    #[test]
+    fn dict_tone_digits_report_actual_line_in_multisyllable_keys() {
+        let ngram = "# total_tokens=1\n# backoff=stupid:0.4\n";
+        let mut failures = Vec::new();
+        for tone in 1..=5 {
+            for key in [format!("ni{tone} hao"), format!("ni hao{tone}")] {
+                // Physical line numbers include comments, blanks, and valid data.
+                let dict = format!("# fixture\n\nni\t你\t1\n# comment\n\n{key}\t你好\t1\n");
+                match Artifacts::from_strs(&dict, ngram, "hello\t1\n") {
+                    Ok(_) => failures.push(format!("accepted tone-bearing key {key:?}")),
+                    Err(error) => {
+                        if !error.contains("dict.tsv line 6:") {
+                            failures.push(format!("wrong location for {key:?}: {error}"));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn dict_toneless_keys_preserve_loading_and_matchers() {
+        let ngram = "# total_tokens=1\n# backoff=stupid:0.4\n";
+        let dict = "# fixture\n\nni\t你\t1\nni hao\t你好\t1\nlv\t绿\t1\n";
+        let artifacts = Artifacts::from_strs(dict, ngram, "hello\t1\n")
+            .expect("toneless dictionary keys must load");
+        assert_eq!(artifacts.stats.dict_entries, 3);
+        for (key, text) in [("ni", "你"), ("lv", "绿")] {
+            let entries = artifacts.builder.char_matcher.get(key).expect("char key");
+            assert_eq!(entries[0].text.as_ref(), text);
+            assert_eq!(entries[0].pinyin.as_ref(), key);
+        }
+        let entries = artifacts.builder.word_matcher.get("nihao").expect("word key");
+        assert_eq!(entries[0].text.as_ref(), "你好");
+        assert_eq!(entries[0].pinyin.as_ref(), "ni hao");
+    }
+
     use super::*;
 
     #[test]
