@@ -209,8 +209,8 @@ struct RecentCommit {
 }
 
 /// The ranking-relevant mass one learn() call added: LM sentences (token
-/// ids as counted), lexicon increments, the phrase vote. Structural
-/// side effects (arc promotion, casing votes, back-fill) are one-time and
+/// ids as counted), lexicon increments, casing votes, the phrase vote. Structural
+/// side effects (arc promotion, back-fill) are one-time and
 /// stay — only the mutable mass is retractable.
 struct LearnRecord {
     weight: f64,
@@ -218,6 +218,7 @@ struct LearnRecord {
     sentences: Vec<Vec<u32>>,
     lex_zh: Vec<(u32, f64)>,
     lex_en: Vec<(u32, f64)>,
+    case_votes: Vec<(u32, Box<str>, f64)>,
     phrase: Option<(u32, f64)>,
 }
 
@@ -427,6 +428,14 @@ impl PersonalStore {
         for &(tok, d) in &rec.lex_en {
             *self.lex_en.entry(tok).or_insert(0.0) -= d;
         }
+        for (tok, surface, delta) in &rec.case_votes {
+            if let Some(votes) = self.case_counts.get_mut(tok) {
+                if let Some(count) = votes.get_mut(surface) {
+                    *count -= delta;
+                }
+            }
+            self.refresh_en_arc(*tok, &surface.to_ascii_lowercase());
+        }
         if let Some((tok, d)) = rec.phrase {
             *self.phrase_counts.entry(tok).or_insert(0.0) -= d;
         }
@@ -453,6 +462,7 @@ impl PersonalStore {
             sentences: Vec::new(),
             lex_zh: Vec::new(),
             lex_en: Vec::new(),
+            case_votes: Vec::new(),
             phrase: None,
         };
         // Pinyin per hanzi unit, recovered from the raw keys when possible.
@@ -498,6 +508,7 @@ impl PersonalStore {
                             .or_default()
                             .entry(surface.as_str().into())
                             .or_insert(0.0) += weight;
+                        rec.case_votes.push((tok, surface.as_str().into(), weight));
                         self.refresh_en_arc(tok, &lower);
                     }
                     i += 1;
@@ -1685,6 +1696,45 @@ mod tests {
         assert!((lm.logp(1, bos, bos) - 0.0).abs() < 1e-9);
         // P(2 | <s> 1) = 0.5/0.5 = 1.0
         assert!((lm.logp(2, bos, 1) - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn casing_retraction_tracks_fractional_repeated_votes() {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        store.import_tsv(&arts, "lex\ttest\t10\ncase\ttest\ttest\n").unwrap();
+        let tok = arts.interner.get("test").unwrap();
+        let record = store.learn(&arts, "TEST TEST", None, None, 0.75).unwrap();
+        assert_eq!(store.case_counts[&tok]["TEST"], 1.5);
+        assert_eq!(&*store.en_surface[&tok], "TEST");
+
+        store.retract(&record);
+
+        assert_eq!(store.case_counts[&tok]["TEST"], 0.0);
+        assert_eq!(store.case_counts[&tok]["test"], 1.0);
+        assert_eq!(store.lex_en[&tok], 10.0);
+        assert_eq!(&*store.en_surface[&tok], "test");
+    }
+
+    #[test]
+    fn casing_correction_retracts_boosted_event_once() {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        for _ in 0..3 {
+            store.commit(&arts, "test", Some("test"), None);
+        }
+        store.commit(&arts, "TEST", Some("test"), None);
+        store.commit(&arts, "Test", Some("test"), None);
+        let tok = arts.interner.get("test").unwrap();
+        assert_eq!(store.case_counts[&tok]["test"], 2.0);
+        assert_eq!(store.case_counts[&tok]["TEST"], 0.0);
+        assert_eq!(store.case_counts[&tok]["Test"], 3.0);
+        assert_eq!(&*store.en_surface[&tok], "Test");
+
+        store.commit(&arts, "Test", Some("test"), None);
+        assert_eq!(store.case_counts[&tok]["test"], 1.0);
+        assert_eq!(store.case_counts[&tok]["TEST"], 0.0);
+        assert_eq!(store.case_counts[&tok]["Test"], 6.0);
     }
 
     #[test]
