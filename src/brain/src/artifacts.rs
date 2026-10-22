@@ -421,6 +421,66 @@ fn parse_english(text: &str, interner: &mut Interner) -> Result<(Matcher, usize)
 #[cfg(test)]
 pub(crate) mod tests {
     #[test]
+    fn dict_unparseable_weight_is_rejected() {
+        let result = Artifacts::from_strs(
+            "ni\t你\tnot-a-number",
+            "# total_tokens=1\n# backoff=stupid:0.4\n",
+            "hello\t1\n",
+        );
+        assert!(result.is_err(), "accepted nonnumeric dictionary weight");
+        let error = result.err().unwrap();
+        assert!(error.contains("dict.tsv line 1:"), "wrong location: {error}");
+    }
+
+    #[test]
+    fn dict_empty_weight_is_rejected() {
+        let result = Artifacts::from_strs(
+            "ni\t你\t",
+            "# total_tokens=1\n# backoff=stupid:0.4\n",
+            "hello\t1\n",
+        );
+        assert!(result.is_err(), "accepted empty dictionary weight");
+        let error = result.err().unwrap();
+        assert!(error.contains("dict.tsv line 1:"), "wrong location: {error}");
+    }
+
+    #[test]
+    fn dict_unparseable_weights_report_actual_line() {
+        for weight in ["not-a-number", ""] {
+            for newline in ["\n", "\r\n"] {
+                let dict = ["# fixture", "", "ni\t你\t1", "# comment", "",
+                    &format!("hao\t好\t{weight}"), ""].join(newline);
+                let result = Artifacts::from_strs(
+                    &dict,
+                    "# total_tokens=1\n# backoff=stupid:0.4\n",
+                    "hello\t1\n",
+                );
+                assert!(result.is_err(), "accepted weight {weight:?} at physical line 6 ({newline:?})");
+                let error = result.err().unwrap();
+                assert!(error.contains("dict.tsv line 6:"), "wrong location: {error}");
+            }
+        }
+    }
+
+    #[test]
+    fn dict_numeric_weights_preserve_integer_conversion_and_sort_order() {
+        let artifacts = Artifacts::from_strs(
+            "ni\t乙\t2.1\nni\t丙\t2.9\nni\t丁\t3\n\
+             ni hao\t乙乙\t2.1\nni hao\t丙丙\t2.9\nni hao\t丁丁\t3\n",
+            "# total_tokens=1\n# backoff=stupid:0.4\n",
+            "hello\t1\n",
+        ).expect("integer and fractional dictionary weights must load");
+        assert_eq!(artifacts.stats.dict_entries, 6);
+        // Fractions truncate to i64 before sorting; ties use descending text.
+        let chars: Vec<_> = artifacts.builder.char_matcher.get("ni").unwrap()
+            .iter().map(|entry| entry.text.as_ref()).collect();
+        let words: Vec<_> = artifacts.builder.word_matcher.get("nihao").unwrap()
+            .iter().map(|entry| entry.text.as_ref()).collect();
+        assert_eq!(chars, ["丁", "乙", "丙"]);
+        assert_eq!(words, ["丁丁", "乙乙", "丙丙"]);
+    }
+
+    #[test]
     fn ngram_example_total_comment_does_not_override_header() {
         let ngram = "# total_tokens=100\n# backoff=stupid:0.4\n# example total_tokens=invalid\n1\t你\t1";
         let result = Artifacts::from_strs("ni\t你\t1", ngram, "hello\t1");
@@ -574,7 +634,7 @@ pub(crate) mod tests {
     #[test]
     fn dict_valid_syllable_keys_preserve_loading() {
         let ngram = "# total_tokens=100\n# backoff=stupid:0.4\n1\thello\t2.5\n";
-        for weight in ["3", "2.5", "-1.5", "NaN", "inf", "invalid", ""] {
+        for weight in ["3", "2.5", "-1.5", "NaN", "inf"] {
             let dict = format!("# fixture\n\nni\t你\t{weight}\nni hao\t你好\t{weight}\n\n# end\n");
             let artifacts = Artifacts::from_strs(&dict, ngram, "hello\t1\n")
                 .unwrap_or_else(|error| panic!("valid keys with weight {weight:?}: {error}"));
@@ -852,7 +912,7 @@ pub(crate) mod tests {
 
     #[test]
     fn dict_three_columns_preserve_comments_blanks_and_weight_parsing() {
-        for weight in ["3", "2.5", "-1.5", "NaN", "inf", "invalid", ""] {
+        for weight in ["3", "2.5", "-1.5", "NaN", "inf"] {
             let dict = format!("# fixture\n\nni hao\t你好\t{weight}\n\n# end\n");
             let artifacts = Artifacts::from_strs(&dict, MINI_NGRAM, MINI_ENGLISH)
                 .unwrap_or_else(|error| panic!("three columns with weight {weight:?}: {error}"));
