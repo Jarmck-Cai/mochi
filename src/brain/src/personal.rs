@@ -733,6 +733,9 @@ impl PersonalStore {
                     if a.is_empty() {
                         return Err(format!("personal.tsv line {}: expected non-empty word", no + 1));
                     }
+                    if a.bytes().any(|byte| byte.is_ascii_uppercase()) {
+                        return Err(format!("personal.tsv line {}: expected lowercase case key", no + 1));
+                    }
                     if b.is_empty() {
                         return Err(format!("personal.tsv line {}: expected non-empty case preference", no + 1));
                     }
