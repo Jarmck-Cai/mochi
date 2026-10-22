@@ -545,6 +545,31 @@ mod tests {
     use crate::artifacts::tests::mini_artifacts;
 
     #[test]
+    fn personal_english_completion_shadows_same_token_general_arc() {
+        let arts = mini_artifacts();
+        let general = arts.builder.build("tes", None);
+        let token = general[0]
+            .iter()
+            .find(|a| a.completed && a.kind == ArcKind::EnWord && a.text == "test")
+            .expect("general completion for test")
+            .lm_token;
+        let zh = Matcher::default();
+        let mut en = Matcher::default();
+        en.add("test", Entry {
+            text: "TEST".into(),
+            pinyin: "test".into(),
+            lm_token: token,
+            fuzzy: false,
+        });
+        let arcs = arts.builder.build("tes", Some(PersonalMatchers { zh: &zh, en: &en }));
+        let completions: Vec<_> = arcs[0].iter()
+            .filter(|a| a.completed && a.end == 3 && a.lm_token == token)
+            .map(|a| (a.text, a.kind))
+            .collect();
+        assert_eq!(completions, vec![("TEST", ArcKind::EnPersonal)]);
+    }
+
+    #[test]
     fn syllable_segmentation_longest_match_with_backtracking() {
         let mut s = SyllableSet::default();
         for syl in ["ni", "hao", "zhong", "wen", "wo", "yao", "ce", "shi", "xi", "an", "xian"] {

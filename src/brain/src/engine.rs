@@ -141,6 +141,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn english_completion_uses_learned_casing() {
+        let e = Engine::mini();
+        e.commit("TEST", Some("test"), None);
+        e.commit("TEST", Some("test"), None);
+
+        // Exact matches and completions must share the learned surface form.
+        assert_eq!(e.query("test", None)[0].text, "TEST");
+        assert_eq!(e.query("tes", None)[0].text, "TEST");
+    }
+
+    #[test]
     fn query_returns_ranked_candidates_with_preedit() {
         let e = Engine::mini();
         let cands = e.query("nihao", None);
