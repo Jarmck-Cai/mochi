@@ -406,6 +406,83 @@ pub(crate) mod tests {
     use super::*;
 
     #[test]
+    fn ngram_effective_nonfinite_alpha_is_rejected() {
+        let mut failures = Vec::new();
+        for alpha in ["NaN", "inf", "-inf", "1e309", "-1e309"] {
+            for header in [
+                format!("# total_tokens=100\n# backoff=stupid:{alpha}\n"),
+                format!("\r\n# fixture\r\n# total_tokens=100\r\n\r\n# backoff=stupid:0.4\r\n# backoff=stupid:{alpha}\r\n\r\n"),
+            ] {
+                let ngram = format!("{header}1\thello\t2.5\n# backoff=stupid:0.4\n");
+                match Artifacts::from_strs("ni\t你\t1\n", &ngram, "hello\t1\n") {
+                    Ok(_) => failures.push(format!("accepted effective alpha {alpha:?}: {header:?}")),
+                    Err(error) => {
+                        if !error.contains("ngram.tsv") || !error.contains("alpha") {
+                            failures.push(format!("wrong error for alpha {alpha:?}: {error}"));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn ngram_finite_alpha_preserves_scores_and_final_header_override() {
+        for alpha in ["0", "-0.4", "0.25", "2", "1e308"] {
+            for earlier in ["NaN", "inf", "-inf", "1e309", "invalid"] {
+                let ngram = format!(
+                    "\r\n# total_tokens=100\r\n# backoff=stupid:{earlier}\r\n\r\n# fixture\r\n# backoff=stupid:{alpha}\r\n\r\n1\thello\t2.5\r\n# backoff=stupid:inf\r\n# total_tokens=999\r\n"
+                );
+                let artifacts = Artifacts::from_strs("ni\t你\t1\n", &ngram, "hello\t1\n")
+                    .unwrap_or_else(|error| panic!("final finite alpha {alpha}: {error}"));
+                let alpha: f64 = alpha.parse().unwrap();
+                assert_eq!(artifacts.lm.alpha, alpha);
+                assert_eq!(artifacts.lm.total, 100.0);
+                assert_eq!(artifacts.stats.ngrams, (1, 0, 0));
+                let hello = artifacts.interner.get("hello").unwrap();
+                let expected = 2.0 * alpha.log10() + (2.5_f64 / 100.0).log10();
+                let actual = artifacts.lm.logp(hello, crate::interner::UNK, crate::interner::UNK);
+                if expected.is_nan() {
+                    assert!(actual.is_nan());
+                } else {
+                    assert_eq!(actual, expected);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn ngram_nonfinite_total_keeps_existing_loading_and_scoring() {
+        for total in ["NaN", "inf", "-inf", "1e309"] {
+            let ngram = format!("# total_tokens={total}\n# backoff=stupid:0.4\n1\thello\t2.5\n");
+            let artifacts = Artifacts::from_strs("ni\t你\t1\n", &ngram, "hello\t1\n")
+                .unwrap_or_else(|error| panic!("legacy total {total} must load: {error}"));
+            let total: f64 = total.parse().unwrap();
+            if total.is_nan() {
+                assert!(artifacts.lm.total.is_nan());
+            } else {
+                assert_eq!(artifacts.lm.total, total);
+            }
+            let hello = artifacts.interner.get("hello").unwrap();
+            let expected = 2.0 * 0.4_f64.log10()
+                + if total > 0.0 { (2.5 / total).log10() } else { crate::lm::OOV_LOGP };
+            assert_eq!(artifacts.lm.logp(hello, crate::interner::UNK, crate::interner::UNK), expected);
+        }
+    }
+
+    #[test]
+    fn ngram_invalid_final_alpha_retains_missing_header_error() {
+        for earlier in ["", "# backoff=stupid:0.4\n", "# backoff=stupid:inf\n"] {
+            let ngram = format!("# total_tokens=100\n{earlier}# backoff=stupid:invalid\n1\thello\t2.5\n");
+            match Artifacts::from_strs("ni\t你\t1\n", &ngram, "hello\t1\n") {
+                Ok(_) => panic!("accepted invalid final alpha"),
+                Err(error) => assert_eq!(error, "ngram.tsv: missing '# backoff=stupid:<alpha>' header"),
+            }
+        }
+    }
+
+    #[test]
     fn ngram_nonfinite_counts_report_file_and_actual_line() {
         let mut failures = Vec::new();
         for (order, tokens) in [("1", "你"), ("2", "<s> 你"), ("3", "<s> <s> 你")] {
