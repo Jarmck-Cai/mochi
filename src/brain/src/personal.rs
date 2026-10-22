@@ -907,6 +907,53 @@ fn align(units: &[Unit], keys: &str, arts: &Artifacts) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn import_tsv_uppercase_case_key_rejects_with_actual_line_number() {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        let result = store.import_tsv(&arts, "# synthetic fixture\n\ncase\tHFO\tHFO\n");
+        assert!(result.is_err(), "uppercase case key must return Err, got {result:?}");
+        let error = result.unwrap_err();
+        assert!(error.contains("personal.tsv line 3:"), "{error}");
+        assert!(store.ext_map.is_empty(), "rejected row must not register tokens");
+        assert!(store.case_counts.is_empty(), "rejected row must not write casing votes");
+    }
+
+    #[test]
+    fn import_tsv_uppercase_case_key_does_not_register_token() {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        let _ = store.import_tsv(&arts, "# synthetic fixture\n\ncase\tHFO\tHFO\n");
+        assert!(store.ext_map.is_empty(), "invalid case key registered tokens: {:?}", store.ext_map);
+    }
+
+    #[test]
+    fn import_tsv_uppercase_case_key_does_not_write_votes() {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        let _ = store.import_tsv(&arts, "# synthetic fixture\n\ncase\tHFO\tHFO\n");
+        assert!(store.case_counts.is_empty(), "invalid case key wrote casing votes: {:?}", store.case_counts);
+    }
+
+    #[test]
+    fn import_tsv_uppercase_case_key_valid_rows_remain_compatible() {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        assert_eq!(store.import_tsv(&arts, "case\thfo\tHFO\n").unwrap(), 1);
+        let token = store.ext_map["hfo"];
+        assert_eq!(store.case_counts[&token].get("HFO"), Some(&1.0));
+        assert_eq!(store.import_tsv(&arts, "lex\tHFO\t12.5\n").unwrap(), 1);
+        assert_eq!(store.lex_en.get(&token), Some(&12.5));
+        assert!(!store.ext_map.contains_key("HFO"));
+        let mut arcs = Vec::new();
+        store.view(None).matchers().en.for_matches("hfo", 0, |end, entries| {
+            if end == 3 {
+                arcs.extend(entries.iter().map(|entry| (entry.lm_token, entry.text.to_string())));
+            }
+        });
+        assert_eq!(arcs, vec![(token, "HFO".to_string())]);
+    }
+
+    #[test]
     fn import_tsv_empty_case_key_rejects_with_actual_line_number() {
         let arts = mini_artifacts();
         let mut store = PersonalStore::new(&arts);
