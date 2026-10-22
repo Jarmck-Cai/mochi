@@ -300,7 +300,10 @@ fn parse_dict(text: &str, interner: &mut Interner) -> Result<DictTables, String>
         if word.is_empty() {
             return Err(format!("dict.tsv line {}: empty text", no + 1));
         }
-        let weight: i64 = weight.parse::<f64>().map(|f| f as i64).unwrap_or(0);
+        let weight: i64 = weight
+            .parse::<f64>()
+            .map(|f| f as i64)
+            .map_err(|_| format!("dict.tsv line {}: bad weight '{}'", no + 1, weight))?;
         for syl in key.split(' ') {
             if syl.is_empty() {
                 return Err(format!("dict.tsv line {}: empty pinyin syllable", no + 1));
