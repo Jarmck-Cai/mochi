@@ -890,6 +890,63 @@ mod tests {
     use super::*;
     use crate::artifacts::tests::mini_artifacts;
 
+    fn check_zhword_empty_syllable(pinyin: &str) {
+        let arts = mini_artifacts();
+        for (prefix, line) in [("", 1), ("# synthetic fixture\n\n# invalid row follows\n", 4)] {
+            let mut store = PersonalStore::new(&arts);
+            // Keep literal ASCII spaces: trimming would hide empty syllables.
+            let fixture = format!("{prefix}zhword\t你好你\t{pinyin}\n");
+            assert!(store.import_tsv(&arts, &fixture).is_err(),
+                "zhword pinyin {pinyin:?} must return Err instead of Ok(1)");
+            let mut store = PersonalStore::new(&arts);
+            let error = store.import_tsv(&arts, &fixture).unwrap_err();
+            assert!(error.contains(&format!("personal.tsv line {line}:")), "{error}");
+            assert!(store.ext_map.is_empty(), "invalid row registered a token");
+            assert!(store.zh_added.is_empty(), "invalid row registered a Chinese arc");
+            let mut arcs = 0;
+            store.view(None).matchers().zh.for_matches("nihaoni", 0, |_, entries| {
+                arcs += entries.len();
+            });
+            assert_eq!(arcs, 0, "invalid row generated a Chinese arc");
+        }
+    }
+
+    #[test]
+    fn import_tsv_zhword_empty_syllable_consecutive_spaces() {
+        check_zhword_empty_syllable("ni  hao ni");
+    }
+
+    #[test]
+    fn import_tsv_zhword_empty_syllable_leading_space() {
+        check_zhword_empty_syllable(" ni hao ni");
+    }
+
+    #[test]
+    fn import_tsv_zhword_empty_syllable_trailing_space() {
+        check_zhword_empty_syllable("ni hao ni ");
+    }
+
+    #[test]
+    fn import_tsv_zhword_empty_syllable_valid_compatibility() {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        let fixture = "# synthetic fixture\n\nzhword\t你好你\tni hao ni\nzhword\t你好\tni hao\n";
+        assert_eq!(store.import_tsv(&arts, fixture).unwrap(), 2,
+            "dictionary words still count as imported rows");
+        let token = store.ext_map["你好你"];
+        assert!(store.zh_added.contains(&token));
+        assert!(!store.zh_added.contains(&arts.interner.get("你好").unwrap()),
+            "dictionary words must not receive personal arcs");
+        let mut arcs = Vec::new();
+        store.view(None).matchers().zh.for_matches("nihaoni", 0, |end, entries| {
+            if end == 7 {
+                arcs.extend(entries.iter().map(|entry|
+                    (entry.lm_token, entry.text.to_string(), entry.pinyin.to_string())));
+            }
+        });
+        assert_eq!(arcs, vec![(token, "你好你".to_string(), "ni hao ni".to_string())]);
+    }
+
     fn ambiguous_pinyin_artifacts() -> Artifacts {
         Artifacts::from_strs(
             "xi\t西\t10\nan\t安\t10\nxian\t先\t10\n",
