@@ -1122,6 +1122,48 @@ mod tests {
         assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 
+    fn check_non_finite_personal_ngram_counts(order: &str, words: &str) {
+        let arts = mini_artifacts();
+        let mut failures = Vec::new();
+        for count in ["NaN", "inf", "-inf", "1e999", "-1e999"] {
+            let mut store = PersonalStore::new(&arts);
+            // Comments and blank lines count towards the reported location.
+            let text = format!("# synthetic fixture\n\n# invalid count follows\n{order}\t{words}\t{count}\n");
+            let result = store.import_tsv(&arts, &text);
+            if !result.is_err() {
+                failures.push(format!("order {order}, count {count}: expected Err, got {result:?}"));
+            } else {
+                let error = result.unwrap_err();
+                assert!(error.contains("personal.tsv line 4:"), "{error}");
+            }
+            if !store.ext_map.is_empty() {
+                failures.push(format!("order {order}, count {count}: invalid row interned tokens"));
+            }
+            let lm = &store.global;
+            if !(lm.uni.is_empty() && lm.bi.is_empty() && lm.tri.is_empty()
+                && lm.uni_hist.is_empty() && lm.bi_hist.is_empty() && lm.total == 0.0)
+            {
+                failures.push(format!("order {order}, count {count}: invalid row wrote LM counts"));
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn import_tsv_rejects_non_finite_unigram_counts() {
+        check_non_finite_personal_ngram_counts("1", "syntheticword");
+    }
+
+    #[test]
+    fn import_tsv_rejects_non_finite_bigram_counts() {
+        check_non_finite_personal_ngram_counts("2", "<s> syntheticword");
+    }
+
+    #[test]
+    fn import_tsv_rejects_non_finite_trigram_counts() {
+        check_non_finite_personal_ngram_counts("3", "<s> synthetichistory syntheticword");
+    }
+
     #[test]
     fn import_tsv_preserves_bos_and_fractional_ngram_counts() {
         let arts = mini_artifacts();
