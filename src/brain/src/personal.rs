@@ -904,6 +904,31 @@ mod tests {
     use crate::artifacts::tests::mini_artifacts;
 
     #[test]
+    fn import_tsv_empty_lex_rejects_with_actual_line_number() {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        let result = store.import_tsv(&arts, "# fixture\n\nlex\t\t12.5\n");
+        assert!(result.is_err(), "empty lex word must return Err, got {result:?}");
+        let error = result.unwrap_err();
+        assert!(error.contains("personal.tsv line 3:"), "{error}");
+        assert!(!store.ext_map.contains_key(""), "empty token must not be registered");
+    }
+
+    #[test]
+    fn import_tsv_empty_lex_does_not_mutate_vocabulary_or_counts() {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        let _ = store.import_tsv(&arts, "# fixture\n\nlex\t\t12.5\n");
+        assert!(!store.ext_map.contains_key(""), "empty token must not be registered");
+        assert!(store.ext_map.is_empty(), "invalid row must not register tokens");
+        assert!(store.lex_en.is_empty() && store.lex_zh.is_empty(),
+            "invalid row must not accumulate lexicon counts");
+        assert!(store.en_added.is_empty() && store.zh_added.is_empty(),
+            "invalid row must not record arc promotion");
+        assert!(store.en_surface.is_empty(), "invalid row must not record an arc surface");
+    }
+
+    #[test]
     fn import_tsv_empty_case_rejects_with_actual_line_number() {
         let arts = mini_artifacts();
         for (fixture, line) in [
