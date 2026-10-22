@@ -713,6 +713,9 @@ impl PersonalStore {
             match kind {
                 "lex" => {
                     let count: f64 = b.parse().map_err(|_| badnum(b))?;
+                    if !count.is_finite() {
+                        return Err(format!("personal.tsv line {}: non-finite count", no + 1));
+                    }
                     if a.is_ascii() {
                         let lower = a.to_ascii_lowercase();
                         let tok = self.token(arts, &lower);
