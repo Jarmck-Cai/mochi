@@ -901,6 +901,58 @@ mod tests {
     use crate::artifacts::tests::mini_artifacts;
 
     #[test]
+    fn import_tsv_empty_case_rejects_with_actual_line_number() {
+        let arts = mini_artifacts();
+        for (fixture, line) in [
+            ("case\thfo\t\n", 1),
+            ("# synthetic fixture\n\n# empty preference follows\ncase\thfo\t\n", 4),
+        ] {
+            let mut store = PersonalStore::new(&arts);
+            assert_eq!(store.import_tsv(&arts, "lex\thfo\t12.5\n").unwrap(), 1);
+            let result = store.import_tsv(&arts, fixture);
+            assert!(result.is_err(), "empty case preference must return Err, got {result:?}");
+            let error = result.unwrap_err();
+            assert!(error.contains(&format!("personal.tsv line {line}:")), "{error}");
+        }
+    }
+
+    #[test]
+    fn import_tsv_empty_case_preserves_existing_word_arc() {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        assert_eq!(store.import_tsv(&arts, "lex\thfo\t12.5\n").unwrap(), 1);
+        let token = store.ext_map["hfo"];
+        let full_arcs = |store: &PersonalStore| {
+            let mut arcs = Vec::new();
+            store.view(None).matchers().en.for_matches("hfo", 0, |end, entries| {
+                if end == 3 {
+                    arcs.extend(entries.iter().map(|entry| (entry.lm_token, entry.text.to_string())));
+                }
+            });
+            arcs
+        };
+        assert_eq!(full_arcs(&store), vec![(token, "hfo".to_string())]);
+        let _ = store.import_tsv(&arts, "case\thfo\t\n");
+        assert_eq!(full_arcs(&store), vec![(token, "hfo".to_string())],
+            "empty case preference must not clear an existing full-match word arc");
+        assert!(!store.case_counts.get(&token).is_some_and(|votes| votes.contains_key("")),
+            "empty case preference must not register a casing vote");
+        assert_eq!(store.import_tsv(&arts, "case\thfo\tHFO\n").unwrap(), 1);
+        assert_eq!(full_arcs(&store), vec![(token, "HFO".to_string())]);
+    }
+
+    #[test]
+    fn import_tsv_empty_case_does_not_register_vote() {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        assert_eq!(store.import_tsv(&arts, "lex\thfo\t12.5\n").unwrap(), 1);
+        let token = store.ext_map["hfo"];
+        let _ = store.import_tsv(&arts, "case\thfo\t\n");
+        assert!(!store.case_counts.get(&token).is_some_and(|votes| votes.contains_key("")),
+            "empty case preference must not register a casing vote");
+    }
+
+    #[test]
     fn import_tsv_zhword_empty_word_is_rejected_before_registration() {
         let arts = mini_artifacts();
         let mut store = PersonalStore::new(&arts);
