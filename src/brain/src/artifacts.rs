@@ -410,6 +410,17 @@ fn parse_english(text: &str, interner: &mut Interner) -> Result<(Matcher, usize)
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn dict_empty_text_is_rejected_at_actual_line() {
+        let dict = "# fixture\n\nni\t\t1\n";
+        let ngram = "# total_tokens=100\n# backoff=stupid:0.4\n1\thello\t2.5\n";
+        let result = Artifacts::from_strs(dict, ngram, "hello\t1\n");
+        assert!(result.is_err(), "accepted empty text in dict.tsv line 3");
+        let error = result.err().unwrap();
+        assert!(error.contains("dict.tsv line 3:"), "wrong location: {error}");
+    }
+
     fn assert_dict_empty_syllable_rejected(key: &str) {
         let ngram = "# total_tokens=100\n# backoff=stupid:0.4\n1\thello\t2.5\n";
         let dict = format!("# fixture\n\nni\t你\t3\n# comment\n\n{key}\t你好\t1\n");
