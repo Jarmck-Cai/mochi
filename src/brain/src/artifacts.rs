@@ -294,6 +294,9 @@ fn parse_dict(text: &str, interner: &mut Interner) -> Result<DictTables, String>
             (Some(k), Some(w), Some(c), None) => (k, w, c),
             _ => return Err(format!("dict.tsv line {}: bad column count", no + 1)),
         };
+        if word.is_empty() {
+            return Err(format!("dict.tsv line {}: empty text", no + 1));
+        }
         let weight: i64 = weight.parse::<f64>().map(|f| f as i64).unwrap_or(0);
         for syl in key.split(' ') {
             if syl.is_empty() {
