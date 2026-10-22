@@ -732,10 +732,22 @@ impl PersonalStore {
                     }
                     if a.is_ascii() {
                         let lower = a.to_ascii_lowercase();
+                        let existing = arts.interner.get(&lower)
+                            .or_else(|| self.ext_map.get(lower.as_str()).copied())
+                            .and_then(|tok| self.lex_en.get(&tok)).copied().unwrap_or(0.0);
+                        if !(existing + count).is_finite() {
+                            return Err(format!("personal.tsv line {}: non-finite accumulated count", no + 1));
+                        }
                         let tok = self.token(arts, &lower);
                         *self.lex_en.entry(tok).or_insert(0.0) += count;
                         en_words.push((tok, lower));
                     } else {
+                        let existing = arts.interner.get(a)
+                            .or_else(|| self.ext_map.get(a).copied())
+                            .and_then(|tok| self.lex_zh.get(&tok)).copied().unwrap_or(0.0);
+                        if !(existing + count).is_finite() {
+                            return Err(format!("personal.tsv line {}: non-finite accumulated count", no + 1));
+                        }
                         let tok = self.token(arts, a);
                         *self.lex_zh.entry(tok).or_insert(0.0) += count;
                     }
@@ -800,6 +812,30 @@ impl PersonalStore {
                             "personal.tsv line {}: expected {} non-empty tokens separated by single ASCII spaces",
                             no + 1, order
                         ));
+                    }
+                    // Look up without interning so a rejected row has no side effects.
+                    // A missing token implies a missing n-gram/history count.
+                    let ids: Vec<Option<u32>> = words.iter().map(|s| {
+                        arts.interner.get(s).or_else(|| self.ext_map.get(*s).copied())
+                    }).collect();
+                    let finite_sum = |existing: Option<&f64>| {
+                        (existing.copied().unwrap_or(0.0) + count).is_finite()
+                    };
+                    let finite = match ids.as_slice() {
+                        [w] => finite_sum(w.and_then(|w| self.global.uni.get(&w)))
+                            && finite_sum(Some(&self.global.total)),
+                        [h1, w] => finite_sum(h1.zip(*w).and_then(|(h1, w)| {
+                            self.global.bi.get(&bi_key(h1, w))
+                        })) && finite_sum(h1.and_then(|h1| self.global.uni_hist.get(&h1))),
+                        [h2, h1, w] => finite_sum(h2.zip(*h1).zip(*w).and_then(|((h2, h1), w)| {
+                            self.global.tri.get(&tri_key(h2, h1, w))
+                        })) && finite_sum(h2.zip(*h1).and_then(|(h2, h1)| {
+                            self.global.bi_hist.get(&bi_key(h2, h1))
+                        })),
+                        _ => unreachable!(), // token count was validated above
+                    };
+                    if !finite {
+                        return Err(format!("personal.tsv line {}: non-finite accumulated count", no + 1));
                     }
                     let mut toks = words.into_iter().map(|s| self.token(arts, s));
                     match kind {
