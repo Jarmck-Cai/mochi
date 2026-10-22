@@ -139,10 +139,10 @@ fn parse_ngram(text: &str, interner: &mut Interner) -> Result<BackoffTrigramLm, 
     let mut alpha: Option<f64> = None;
     let mut total: Option<f64> = None;
     for line in text.lines().take_while(|l| l.is_empty() || l.starts_with('#')) {
-        if let Some(v) = line.split("total_tokens=").nth(1) {
+        if let Some(v) = line.strip_prefix("# total_tokens=") {
             total = v.trim().parse().ok();
         }
-        if let Some(v) = line.split("backoff=stupid:").nth(1) {
+        if let Some(v) = line.strip_prefix("# backoff=stupid:") {
             alpha = v.trim().parse().ok();
         }
     }
