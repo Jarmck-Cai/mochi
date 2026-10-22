@@ -712,6 +712,9 @@ impl PersonalStore {
             let badnum = |v: &str| format!("personal.tsv line {}: bad count '{}'", no + 1, v);
             match kind {
                 "lex" => {
+                    if a.is_empty() {
+                        return Err(format!("personal.tsv line {}: expected non-empty word", no + 1));
+                    }
                     let count: f64 = b.parse().map_err(|_| badnum(b))?;
                     if !count.is_finite() {
                         return Err(format!("personal.tsv line {}: non-finite count", no + 1));
