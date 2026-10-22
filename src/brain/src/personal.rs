@@ -912,6 +912,67 @@ fn align(units: &[Unit], keys: &str, arts: &Artifacts) -> Option<Vec<String>> {
 
 #[cfg(test)]
 mod tests {
+    fn check_zhword_tone_digit(pinyin: &str) {
+        let arts = mini_artifacts();
+        for (prefix, line) in [("# fixture\n\n", 3), ("# fixture\n\n# comment\n\n", 5)] {
+            let mut store = PersonalStore::new(&arts);
+            let fixture = format!("{prefix}zhword\t你好你\t{pinyin}\n");
+            let result = store.import_tsv(&arts, &fixture);
+            assert!(result.is_err(),
+                "tone digits must be rejected for {pinyin:?}, got {result:?}");
+            let error = result.unwrap_err();
+            assert!(error.contains(&format!("personal.tsv line {line}:")), "{error}");
+            assert!(store.ext_map.is_empty(), "invalid row registered a token");
+            assert!(store.zh_added.is_empty(), "invalid row registered an arc");
+            for keys in [pinyin.replace(' ', ""), "nihaoni".to_string()] {
+                let mut found = false;
+                store.view(None).matchers().zh.for_matches(&keys, 0, |_, entries| {
+                    found |= !entries.is_empty();
+                });
+                assert!(!found, "invalid row generated an arc for {keys:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn import_tsv_zhword_tone_digit_1() {
+        check_zhword_tone_digit("ni1 hao ni");
+    }
+
+    #[test]
+    fn import_tsv_zhword_tone_digit_2() {
+        check_zhword_tone_digit("ni hao2 ni");
+    }
+
+    #[test]
+    fn import_tsv_zhword_tone_digit_3_exact_reproduction() {
+        check_zhword_tone_digit("ni3 hao3 ni3");
+    }
+
+    #[test]
+    fn import_tsv_zhword_tone_digit_4() {
+        check_zhword_tone_digit("ni hao ni4");
+    }
+
+    #[test]
+    fn import_tsv_zhword_tone_digit_5() {
+        check_zhword_tone_digit("ni hao5 ni");
+    }
+
+    #[test]
+    fn import_tsv_zhword_tone_digit_untoned_compatibility() {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        assert_eq!(store.import_tsv(&arts, "# fixture\n\nzhword\t你好你\tni hao ni\n").unwrap(), 1);
+        let token = store.ext_map["你好你"];
+        assert!(store.zh_added.contains(&token));
+        let mut arcs = Vec::new();
+        store.view(None).matchers().zh.for_matches("nihaoni", 0, |end, entries| {
+            arcs.extend(entries.iter().map(|entry| (end, entry.lm_token, entry.text.to_string())));
+        });
+        assert_eq!(arcs, vec![(7, token, "你好你".to_string())]);
+    }
+
     #[test]
     fn import_tsv_mismatched_case_rejects_with_actual_line_number() {
         let arts = mini_artifacts();
