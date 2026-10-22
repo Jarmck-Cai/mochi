@@ -33,8 +33,8 @@ pub struct BackoffTrigramLm {
     uni: Vec<f32>,                // token id -> count (0.0 = unseen)
     bi: FxHashMap<u64, f32>,      // (h1, w) -> count
     tri: FxHashMap<u128, f32>,    // (h2, h1, w) -> count
-    bi_hist: FxHashMap<u64, f32>, // (h2, h1) -> Σ tri counts (trigram denominator)
-    uni_hist: Vec<f32>,           // h1 -> Σ bi counts (bigram denominator)
+    bi_hist: FxHashMap<u64, f64>, // (h2, h1) -> Σ tri counts (trigram denominator)
+    uni_hist: Vec<f64>,           // h1 -> Σ bi counts (bigram denominator)
 }
 
 impl BackoffTrigramLm {
@@ -76,13 +76,13 @@ impl BackoffTrigramLm {
         }
         self.bi_hist.clear();
         for (&k, &c) in &self.tri {
-            *self.bi_hist.entry((k >> 32) as u64).or_insert(0.0) += c;
+            *self.bi_hist.entry((k >> 32) as u64).or_insert(0.0) += c as f64;
         }
         self.uni_hist = vec![0.0; vocab_size];
         for (&k, &c) in &self.bi {
             let h1 = (k >> 32) as usize;
             if h1 < self.uni_hist.len() {
-                self.uni_hist[h1] += c;
+                self.uni_hist[h1] += c as f64;
             }
         }
     }
@@ -95,7 +95,7 @@ impl BackoffTrigramLm {
                     if c3 > 0.0 {
                         if let Some(&denom) = self.bi_hist.get(&bi_key(h2, h1)) {
                             if denom > 0.0 {
-                                return (c3 as f64 / denom as f64).log10();
+                                return (c3 as f64 / denom).log10();
                             }
                         }
                     }
@@ -108,7 +108,7 @@ impl BackoffTrigramLm {
                         // load, so ids can exceed the load-time vocab size.
                         let denom = self.uni_hist.get(h1 as usize).copied().unwrap_or(0.0);
                         if denom > 0.0 {
-                            return self.log_alpha + (c2 as f64 / denom as f64).log10();
+                            return self.log_alpha + (c2 as f64 / denom).log10();
                         }
                     }
                 }
@@ -131,11 +131,12 @@ impl BackoffTrigramLm {
         // FxHashMap entry ≈ (key + val) / load_factor(~0.85) + control byte
         let bi_entry = (8 + 4 + 1) * 100 / 85;
         let tri_entry = (16 + 4 + 1) * 100 / 85;
+        let bi_hist_entry = (8 + 8 + 1) * 100 / 85;
         self.uni.len() * 4
-            + self.uni_hist.len() * 4
+            + self.uni_hist.len() * 8
             + self.bi.len() * bi_entry
             + self.tri.len() * tri_entry
-            + self.bi_hist.len() * bi_entry
+            + self.bi_hist.len() * bi_hist_entry
     }
 }
 
