@@ -461,6 +461,14 @@ impl LatticeBuilder {
                 p.en.for_completions(remainder, |_k, entries| {
                     for e in entries.iter().take(1) {
                         if left > 0 {
+                            // Match exact-English shadowing without removing
+                            // other tokens or changing either source's budget.
+                            out.retain(|a| {
+                                !(a.completed
+                                    && a.kind == ArcKind::EnWord
+                                    && a.end == n
+                                    && a.lm_token == e.lm_token)
+                            });
                             out.push(Arc {
                                 end: n,
                                 text: &e.text,
@@ -546,7 +554,15 @@ mod tests {
 
     #[test]
     fn personal_english_completion_shadows_same_token_general_arc() {
-        let arts = mini_artifacts();
+        let mut arts = mini_artifacts();
+        arts.builder.en_matcher.add("tester", Entry {
+            text: "tester".into(),
+            pinyin: "tester".into(),
+            lm_token: 900,
+            fuzzy: false,
+        });
+        arts.builder.en_key_index.push("tester".into());
+        arts.builder.en_key_index.sort_unstable();
         let general = arts.builder.build("tes", None);
         let token = general[0]
             .iter()
@@ -567,6 +583,10 @@ mod tests {
             .map(|a| (a.text, a.kind))
             .collect();
         assert_eq!(completions, vec![("TEST", ArcKind::EnPersonal)]);
+        assert!(arcs[0].iter().any(|a| {
+            a.completed && a.kind == ArcKind::EnWord && a.text == "tester"
+                && a.lm_token == 900 && a.end == 3
+        }));
     }
 
     #[test]
