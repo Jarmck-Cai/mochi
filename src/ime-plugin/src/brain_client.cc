@@ -7,6 +7,34 @@ namespace mochi {
 namespace {
 const wchar_t kPipeName[] = L"\\\\.\\pipe\\mochi-brain-v0";
 
+// Compute floor(remainder * 1000000 / frequency), with remainder < frequency.
+ULONGLONG FractionUs(ULONGLONG remainder, ULONGLONG frequency) {
+  if (remainder <= ~0ULL / 1000000ULL)
+    return remainder * 1000000ULL / frequency;
+
+  // Binary long multiplication/division keeps each partial remainder below
+  // frequency. Since frequency <= INT64_MAX, doubling or adding two reduced
+  // remainders fits in unsigned 64 bits, even at extreme QPC frequencies.
+  ULONGLONG quotient = 0;
+  ULONGLONG partial = 0;
+  for (unsigned bit = 1U << 19; bit; bit >>= 1) {
+    quotient *= 2;
+    partial *= 2;
+    if (partial >= frequency) {
+      partial -= frequency;
+      ++quotient;
+    }
+    if (1000000U & bit) {
+      partial += remainder;
+      if (partial >= frequency) {
+        partial -= frequency;
+        ++quotient;
+      }
+    }
+  }
+  return quotient;
+}
+
 // GetTickCount64 has 10-16ms granularity — useless against a 15ms budget
 // (quantization produced spurious instant timeouts in E2E testing). QPC is
 // steady, ~µs-resolution, and cheap (~20ns per call on modern Windows).
@@ -18,7 +46,8 @@ ULONGLONG NowUs() {
   }();
   LARGE_INTEGER c;
   QueryPerformanceCounter(&c);
-  return static_cast<ULONGLONG>(c.QuadPart) * 1000000ULL / freq;
+  const ULONGLONG counter = static_cast<ULONGLONG>(c.QuadPart);
+  return (counter / freq) * 1000000ULL + FractionUs(counter % freq, freq);
 }
 
 // Lifecycle calls are serialized separately so joining never holds the state
