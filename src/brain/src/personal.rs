@@ -910,6 +910,94 @@ fn align(units: &[Unit], keys: &str, arts: &Artifacts) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn import_tsv_mismatched_case_rejects_with_actual_line_number() {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        let result = store.import_tsv(&arts, "# fixture\n\ncase\thfo\tEEG\n");
+        assert!(result.is_err(), "mismatched case preference must return Err, got {result:?}");
+        let error = result.unwrap_err();
+        assert!(error.contains("personal.tsv line 3:"), "{error}");
+        assert!(store.ext_map.is_empty(), "rejected row must not register tokens");
+        assert!(store.case_counts.is_empty(), "rejected row must not write casing votes");
+        assert!(store.en_added.is_empty() && store.en_surface.is_empty());
+    }
+
+    #[test]
+    fn import_tsv_mismatched_case_does_not_register_token() {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        let _ = store.import_tsv(&arts, "# fixture\n\ncase\thfo\tEEG\n");
+        assert!(store.ext_map.is_empty(), "mismatched preference registered tokens: {:?}", store.ext_map);
+    }
+
+    #[test]
+    fn import_tsv_mismatched_case_does_not_write_votes_or_arcs() {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        let _ = store.import_tsv(&arts, "# fixture\n\ncase\thfo\tEEG\n");
+        let mut arcs = Vec::new();
+        store.view(None).matchers().en.for_matches("hfo", 0, |end, entries| {
+            if end == 3 {
+                arcs.extend(entries.iter().map(|entry| entry.text.to_string()));
+            }
+        });
+        assert!(arcs.is_empty(), "mismatched preference created arcs: {arcs:?}");
+        assert!(store.case_counts.is_empty(), "mismatched preference wrote casing votes");
+        assert!(store.en_added.is_empty() && store.en_surface.is_empty());
+    }
+
+    #[test]
+    fn import_tsv_mismatched_case_preserves_existing_arc_and_votes() {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        assert_eq!(store.import_tsv(&arts, "lex\thfo\t12.5\n").unwrap(), 1);
+        let token = store.ext_map["hfo"];
+        let arc_texts = |store: &PersonalStore| {
+            let mut arcs = Vec::new();
+            store.view(None).matchers().en.for_matches("hfo", 0, |end, entries| {
+                if end == 3 {
+                    arcs.extend(entries.iter().map(|entry| (entry.lm_token, entry.text.to_string())));
+                }
+            });
+            arcs
+        };
+        assert_eq!(arc_texts(&store), vec![(token, "hfo".to_string())]);
+        let tokens_before = store.ext_map.clone();
+        let votes_before = store.case_counts.clone();
+        let _ = store.import_tsv(&arts, "# fixture\n\ncase\thfo\tEEG\n");
+        assert_eq!(arc_texts(&store), vec![(token, "hfo".to_string())],
+            "rejected preference must preserve the existing word arc");
+        assert_eq!(store.ext_map, tokens_before);
+        assert_eq!(store.case_counts, votes_before);
+        assert_eq!(store.lex_en.get(&token), Some(&12.5));
+    }
+
+    #[test]
+    fn import_tsv_mismatched_case_valid_rows_remain_compatible() {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        let text = "case\thfo\tHFO\ncase\tresnet\tResNet\nlex\tresnet\t3.0\nlex\thfo\t12.5\nlex\t你好你\t4.0\nzhword\t你好你\tni hao ni\n1\t你好你\t4.0\n2\t<s> 你好你\t4.0\n3\t<s> <s> 你好你\t2.0\n";
+        assert_eq!(store.import_tsv(&arts, text).unwrap(), 9);
+        for (key, surface) in [("hfo", "HFO"), ("resnet", "ResNet")] {
+            let token = store.ext_map[key];
+            assert_eq!(store.case_counts[&token].get(surface), Some(&1.0));
+            let mut arcs = Vec::new();
+            store.view(None).matchers().en.for_matches(key, 0, |end, entries| {
+                if end == key.len() {
+                    arcs.extend(entries.iter().map(|entry| (entry.lm_token, entry.text.to_string())));
+                }
+            });
+            assert_eq!(arcs, vec![(token, surface.to_string())]);
+        }
+        let phrase = store.ext_map["你好你"];
+        assert!(store.zh_added.contains(&phrase));
+        assert_eq!(store.lex_zh.get(&phrase), Some(&4.0));
+        assert_eq!(store.global.uni.get(&phrase), Some(&4.0));
+        assert_eq!(store.global.bi.get(&bi_key(arts.bos, phrase)), Some(&4.0));
+        assert_eq!(store.global.tri.get(&tri_key(arts.bos, arts.bos, phrase)), Some(&2.0));
+    }
+
+    #[test]
     fn import_tsv_uppercase_case_key_rejects_with_actual_line_number() {
         let arts = mini_artifacts();
         let mut store = PersonalStore::new(&arts);
