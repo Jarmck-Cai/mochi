@@ -737,6 +737,13 @@ impl PersonalStore {
                     en_words.push((tok, a.to_string()));
                 }
                 "zhword" => {
+                    // Preserve ASCII-space boundaries and validate before interning.
+                    if b.split(' ').any(|syllable| syllable.is_empty()) {
+                        return Err(format!(
+                            "personal.tsv line {}: expected non-empty syllables separated by single ASCII spaces",
+                            no + 1
+                        ));
+                    }
                     let tok = self.token(arts, a);
                     let word = a.to_string();
                     self.maybe_add_zh_arc(arts, tok, &word, Some(b), 0.0, true);
