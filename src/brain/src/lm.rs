@@ -168,6 +168,74 @@ mod tests {
     use super::*;
 
     #[test]
+    fn duplicate_bigram_large_finite_counts_stay_finite() {
+        let (h1, w) = (0, 1);
+        let mut lm = BackoffTrigramLm::new(0.4, 1e39);
+        lm.add_bigram(h1, w, 3e38);
+        lm.add_bigram(h1, w, 3e38);
+        lm.finalize(2);
+
+        let actual = lm.logp(w, crate::interner::UNK, h1);
+        assert!(actual.is_finite(), "duplicate bigram logp: {actual}");
+        assert!((actual - 0.4f64.log10()).abs() < 1e-6);
+    }
+
+    #[test]
+    fn duplicate_unigram_large_finite_counts_stay_finite() {
+        let w = 0;
+        let count = 3e38f32;
+        let mut lm = BackoffTrigramLm::new(0.4, 1e39);
+        lm.add_unigram(w, count);
+        lm.add_unigram(w, count);
+        lm.finalize(1);
+
+        let actual = lm.logp(w, crate::interner::UNK, crate::interner::UNK);
+        let expected = 2.0 * 0.4f64.log10() + (2.0 * f64::from(count) / 1e39).log10();
+        assert!(actual.is_finite(), "duplicate unigram logp: {actual}");
+        assert!((actual - expected).abs() < 1e-6);
+    }
+
+    #[test]
+    fn duplicate_trigram_large_finite_counts_stay_finite() {
+        let (h2, h1, w, other) = (0, 1, 2, 3);
+        let mut lm = BackoffTrigramLm::new(0.4, 1e39);
+        lm.add_trigram(h2, h1, w, 3e38);
+        lm.add_trigram(h2, h1, w, 3e38);
+        lm.add_trigram(h2, h1, other, 3e38);
+        lm.finalize(4);
+
+        for (token, probability) in [(w, 2.0f64 / 3.0), (other, 1.0 / 3.0)] {
+            let actual = lm.logp(token, h2, h1);
+            assert!(actual.is_finite(), "duplicate trigram logp for {token}: {actual}");
+            assert!((actual - probability.log10()).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn duplicate_small_counts_preserve_addition_and_backoff() {
+        let (h2, h1, w, other) = (0, 1, 2, 3);
+        let mut lm = BackoffTrigramLm::new(0.4, 20.0);
+        for count in [2.0, 3.0] {
+            lm.add_unigram(w, count);
+            lm.add_bigram(h1, w, count);
+            lm.add_trigram(h2, h1, w, count);
+        }
+        lm.add_bigram(h1, other, 5.0);
+        lm.add_trigram(h2, h1, other, 5.0);
+        lm.finalize(4);
+
+        for (actual, expected) in [
+            (lm.logp(w, h2, h1), 0.5f64.log10()),
+            (lm.logp(w, crate::interner::UNK, h1), 0.4f64.log10() + 0.5f64.log10()),
+            (lm.logp(w, crate::interner::UNK, crate::interner::UNK),
+                2.0 * 0.4f64.log10() + 0.25f64.log10()),
+        ] {
+            assert!((actual - expected).abs() < 1e-9,
+                "duplicate small-count logp: expected {expected}, got {actual}");
+        }
+    }
+
+    #[test]
     fn bigram_finite_counts_above_f32_history_range_stay_normalized() {
         let (a, b, c) = (0, 1, 2);
         let mut lm = BackoffTrigramLm::new(0.4, 1e39);
