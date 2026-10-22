@@ -151,6 +151,9 @@ fn parse_ngram(text: &str, interner: &mut Interner) -> Result<BackoffTrigramLm, 
     if !alpha.is_finite() {
         return Err("ngram.tsv: non-finite alpha".into());
     }
+    if !total.is_finite() {
+        return Err("ngram.tsv: non-finite total_tokens".into());
+    }
     let mut lm = BackoffTrigramLm::new(alpha, total);
     for (no, line) in text.lines().enumerate() {
         if line.is_empty() || line.starts_with('#') {
