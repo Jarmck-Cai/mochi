@@ -903,6 +903,34 @@ fn align(units: &[Unit], keys: &str, arts: &Artifacts) -> Option<Vec<String>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn import_tsv_empty_case_key_rejects_with_actual_line_number() {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        let result = store.import_tsv(&arts, "# fixture\n\ncase\t\tHFO\n");
+        assert!(result.is_err(), "empty case key must return Err, got {result:?}");
+        let error = result.unwrap_err();
+        assert!(error.contains("personal.tsv line 3:"), "{error}");
+        assert!(!store.ext_map.contains_key(""), "empty token must not be registered");
+        assert!(store.case_counts.is_empty(), "invalid row must not add casing votes");
+    }
+
+    #[test]
+    fn import_tsv_empty_case_key_does_not_register_token() {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        let _ = store.import_tsv(&arts, "# fixture\n\ncase\t\tHFO\n");
+        assert!(!store.ext_map.contains_key(""), "empty token must not be registered");
+    }
+
+    #[test]
+    fn import_tsv_empty_case_key_does_not_add_casing_votes() {
+        let arts = mini_artifacts();
+        let mut store = PersonalStore::new(&arts);
+        let _ = store.import_tsv(&arts, "# fixture\n\ncase\t\tHFO\n");
+        assert!(store.case_counts.is_empty(), "invalid row must not add casing votes");
+    }
+
     use super::*;
     use crate::artifacts::tests::mini_artifacts;
 
